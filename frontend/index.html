@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareerLift — Resume & Job Application Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none; }
+    .tab-active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: 600; }
+    .score-ring { transform: rotate(-90deg); transform-origin: 50% 50%; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-900">
+
+<!-- Header -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+  <div class="max-w-6xl mx-auto px-4">
+    <div class="flex items-center justify-between h-14">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl font-bold text-brand-600">CareerLift</span>
+        <span class="text-sm text-gray-400 hidden sm:block">AI Resume & Job Tool for IT Pros</span>
+      </div>
+      <div id="api-status" class="text-xs text-gray-400"></div>
+    </div>
+    <!-- Tabs -->
+    <nav class="flex gap-0 -mb-px">
+      <button onclick="showTab('resume')" id="tab-btn-resume"
+        class="tab-btn px-5 py-3 text-sm text-gray-500 hover:text-brand-600 border-b-2 border-transparent transition-colors">
+        Resume
+      </button>
+      <button onclick="showTab('optimize')" id="tab-btn-optimize"
+        class="tab-btn px-5 py-3 text-sm text-gray-500 hover:text-brand-600 border-b-2 border-transparent transition-colors">
+        Optimize
+      </button>
+      <button onclick="showTab('jobs')" id="tab-btn-jobs"
+        class="tab-btn px-5 py-3 text-sm text-gray-500 hover:text-brand-600 border-b-2 border-transparent transition-colors">
+        Job Search
+      </button>
+      <button onclick="showTab('tracker')" id="tab-btn-tracker"
+        class="tab-btn px-5 py-3 text-sm text-gray-500 hover:text-brand-600 border-b-2 border-transparent transition-colors">
+        Tracker
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-6">
+
+<!-- ===== TAB: RESUME ===== -->
+<div id="tab-resume" class="tab-panel fade-in">
+  <div class="grid md:grid-cols-2 gap-6">
+    <!-- Upload -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+      <h2 class="text-lg font-semibold mb-4">Upload or Paste Resume</h2>
+      <!-- Sub-tabs -->
+      <div class="flex gap-2 mb-4 border-b border-gray-100">
+        <button onclick="setInputMode('upload')" id="mode-upload"
+          class="input-mode-btn pb-2 text-sm font-medium text-brand-600 border-b-2 border-brand-600">Upload File</button>
+        <button onclick="setInputMode('paste')" id="mode-paste"
+          class="input-mode-btn pb-2 text-sm font-medium text-gray-400 border-b-2 border-transparent">Paste Text</button>
+      </div>
+
+      <!-- Upload mode -->
+      <div id="upload-mode">
+        <label class="block w-full border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand-500 transition-colors" for="file-input">
+          <div class="text-4xl mb-2">📄</div>
+          <div class="text-sm text-gray-600">Drop your resume here or <span class="text-brand-600 font-medium">browse</span></div>
+          <div class="text-xs text-gray-400 mt-1">PDF, DOCX, or TXT</div>
+          <input id="file-input" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" class="hidden" onchange="handleFileUpload(event)">
+        </label>
+      </div>
+
+      <!-- Paste mode -->
+      <div id="paste-mode" class="hidden">
+        <textarea id="paste-input" rows="14" placeholder="Paste your resume text here..."
+          class="w-full border border-gray-200 rounded-lg p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+        <button onclick="handlePasteSubmit()"
+          class="mt-3 w-full bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">
+          Parse Resume
+        </button>
+      </div>
+
+      <div id="upload-status" class="mt-3 text-sm"></div>
+    </div>
+
+    <!-- Parsed Result -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+      <h2 class="text-lg font-semibold mb-4">Parsed Resume</h2>
+      <div id="parsed-empty" class="text-sm text-gray-400 text-center py-12">
+        Upload or paste your resume to see the parsed data
+      </div>
+      <div id="parsed-result" class="hidden space-y-4">
+        <!-- Contact Card -->
+        <div class="bg-gray-50 rounded-lg p-4">
+          <div id="parsed-name" class="font-semibold text-base"></div>
+          <div id="parsed-contact" class="text-sm text-gray-500 mt-1"></div>
+        </div>
+        <!-- Summary -->
+        <div id="parsed-summary-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-1">Summary</div>
+          <p id="parsed-summary" class="text-sm text-gray-700"></p>
+        </div>
+        <!-- Experience -->
+        <div>
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Experience (<span id="exp-count">0</span> roles)</div>
+          <div id="parsed-experience" class="space-y-2"></div>
+        </div>
+        <!-- Skills -->
+        <div>
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Skills</div>
+          <div id="parsed-skills" class="flex flex-wrap gap-1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB: OPTIMIZE ===== -->
+<div id="tab-optimize" class="tab-panel hidden fade-in">
+  <div class="grid md:grid-cols-3 gap-6">
+    <!-- Left: controls -->
+    <div class="md:col-span-1 space-y-4">
+      <!-- Role selector -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 class="font-semibold mb-3">Target Role</h3>
+        <div class="space-y-2">
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+            <input type="radio" name="target-role" value="tech_sales" class="mt-1">
+            <div>
+              <div class="text-sm font-medium">Tech Sales / Solutions Engineer</div>
+              <div class="text-xs text-gray-400">Client-facing technical roles, presales</div>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+            <input type="radio" name="target-role" value="product_owner" class="mt-1">
+            <div>
+              <div class="text-sm font-medium">Product Owner / PM</div>
+              <div class="text-xs text-gray-400">Agile product management, roadmaps</div>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+            <input type="radio" name="target-role" value="cybersecurity" class="mt-1" checked>
+            <div>
+              <div class="text-sm font-medium">Cybersecurity Analyst</div>
+              <div class="text-xs text-gray-400">SOC, incident response, compliance</div>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+            <input type="radio" name="target-role" value="data_analyst" class="mt-1">
+            <div>
+              <div class="text-sm font-medium">Data Analyst / BI</div>
+              <div class="text-xs text-gray-400">SQL, dashboards, KPI reporting</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- JD paste -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 class="font-semibold mb-1">Job Description <span class="text-gray-400 text-xs font-normal">(optional)</span></h3>
+        <p class="text-xs text-gray-400 mb-2">Paste for extra-targeted optimization</p>
+        <textarea id="jd-input" rows="6" placeholder="Paste job description here..."
+          class="w-full border border-gray-200 rounded-lg p-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="space-y-2">
+        <button onclick="runATSScore()"
+          class="w-full bg-white border border-brand-600 text-brand-600 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 transition-colors">
+          Score ATS Match
+        </button>
+        <button onclick="optimizeResume()"
+          class="w-full bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">
+          Optimize Resume (AI)
+        </button>
+        <button onclick="generateCoverLetter()"
+          class="w-full bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+          Generate Cover Letter
+        </button>
+        <button onclick="downloadDocx()" id="download-btn" class="hidden w-full bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors">
+          Download Optimized DOCX
+        </button>
+      </div>
+    </div>
+
+    <!-- Right: output -->
+    <div class="md:col-span-2 space-y-4">
+      <!-- ATS Score -->
+      <div id="ats-result" class="hidden bg-white rounded-xl border border-gray-200 p-5 shadow-sm fade-in">
+        <h3 class="font-semibold mb-4">ATS Score</h3>
+        <div class="flex items-center gap-6 mb-4">
+          <div class="relative w-24 h-24 flex-shrink-0">
+            <svg viewBox="0 0 36 36" class="w-24 h-24">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e5e7eb" stroke-width="3.8"/>
+              <circle id="score-ring" cx="18" cy="18" r="15.9" fill="none" stroke="#2563eb"
+                stroke-width="3.8" stroke-linecap="round" stroke-dasharray="0 100" class="score-ring transition-all duration-700"/>
+            </svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span id="score-number" class="text-xl font-bold text-brand-600">0</span>
+            </div>
+          </div>
+          <div class="flex-1">
+            <div id="score-label" class="text-sm font-medium text-gray-600 mb-2"></div>
+            <div class="space-y-1" id="section-scores"></div>
+          </div>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-xs font-semibold uppercase text-green-600 mb-1">Matched Keywords</div>
+            <div id="matched-kw" class="flex flex-wrap gap-1"></div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold uppercase text-red-500 mb-1">Missing Keywords</div>
+            <div id="missing-kw" class="flex flex-wrap gap-1"></div>
+          </div>
+        </div>
+        <div id="recommendations" class="mt-4 space-y-1"></div>
+      </div>
+
+      <!-- Optimized resume output -->
+      <div id="optimize-output-block" class="hidden bg-white rounded-xl border border-gray-200 p-5 shadow-sm fade-in">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-semibold">Optimized Resume</h3>
+          <span id="optimize-status" class="text-xs text-gray-400"></span>
+        </div>
+        <pre id="optimize-output" class="text-xs bg-gray-50 border border-gray-100 rounded p-4 max-h-96 overflow-y-auto text-gray-800"></pre>
+      </div>
+
+      <!-- Cover letter output -->
+      <div id="cover-letter-block" class="hidden bg-white rounded-xl border border-gray-200 p-5 shadow-sm fade-in">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-semibold">Cover Letter</h3>
+          <button onclick="copyCoverLetter()" class="text-xs text-brand-600 hover:underline">Copy</button>
+        </div>
+        <pre id="cover-letter-output" class="text-sm bg-gray-50 border border-gray-100 rounded p-4 max-h-80 overflow-y-auto text-gray-800 font-sans"></pre>
+      </div>
+
+      <div id="optimize-empty" class="bg-white rounded-xl border border-gray-200 p-10 text-center text-gray-400 text-sm shadow-sm">
+        Upload your resume first, then score or optimize it
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB: JOBS ===== -->
+<div id="tab-jobs" class="tab-panel hidden fade-in">
+  <!-- Search bar -->
+  <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-5">
+    <div class="grid sm:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Target Role</label>
+        <select id="job-role" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="tech_sales">Tech Sales / Solutions Engineer</option>
+          <option value="product_owner">Product Owner / PM</option>
+          <option value="cybersecurity" selected>Cybersecurity Analyst</option>
+          <option value="data_analyst">Data Analyst / BI</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Location</label>
+        <input id="job-location" type="text" value="remote" placeholder="City, State or 'remote'"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Min Salary ($)</label>
+        <input id="job-salary" type="number" value="70000" step="10000"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="flex items-end">
+        <button onclick="searchJobs()"
+          class="w-full bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors">
+          Search Jobs
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="jobs-loading" class="hidden text-center py-12 text-gray-400">
+    <div class="inline-block w-8 h-8 border-4 border-brand-200 border-t-brand-600 rounded-full spinner mb-3"></div>
+    <div class="text-sm">Searching job boards...</div>
+  </div>
+
+  <div id="jobs-results" class="space-y-3"></div>
+  <div id="jobs-empty" class="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm shadow-sm">
+    Use the search above to find high-paying jobs matching your target role
+  </div>
+
+  <!-- Apply Package Modal -->
+  <div id="apply-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-xl">
+      <div class="flex justify-between items-start mb-4">
+        <h3 class="font-semibold text-lg" id="modal-job-title">Apply Package</h3>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+      <div id="modal-cover-letter-section">
+        <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Cover Letter</div>
+        <div id="modal-cl-loading" class="text-center py-8 text-gray-400">
+          <div class="inline-block w-6 h-6 border-3 border-brand-200 border-t-brand-600 rounded-full spinner mb-2"></div>
+          <div class="text-sm">Generating cover letter...</div>
+        </div>
+        <pre id="modal-cl-output" class="hidden text-sm bg-gray-50 rounded p-3 text-gray-800 font-sans"></pre>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <button onclick="copyModalCL()" class="flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700">Copy Cover Letter</button>
+        <button onclick="addToTracker()" class="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">Add to Tracker</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB: TRACKER ===== -->
+<div id="tab-tracker" class="tab-panel hidden fade-in">
+  <!-- Stats -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+      <div id="stat-total" class="text-3xl font-bold text-brand-600">0</div>
+      <div class="text-xs text-gray-400 mt-1">Total Applied</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+      <div id="stat-rate" class="text-3xl font-bold text-green-500">0%</div>
+      <div class="text-xs text-gray-400 mt-1">Response Rate</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+      <div id="stat-interviews" class="text-3xl font-bold text-yellow-500">0</div>
+      <div class="text-xs text-gray-400 mt-1">Interviews</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+      <div id="stat-offers" class="text-3xl font-bold text-purple-500">0</div>
+      <div class="text-xs text-gray-400 mt-1">Offers</div>
+    </div>
+  </div>
+
+  <!-- Follow-up reminders -->
+  <div id="followup-block" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
+    <div class="text-sm font-semibold text-amber-700 mb-2">Follow-up Reminders (due within 3 days)</div>
+    <div id="followup-list" class="space-y-1"></div>
+  </div>
+
+  <!-- Actions bar -->
+  <div class="flex justify-between items-center mb-4">
+    <h2 class="font-semibold">Applications</h2>
+    <button onclick="openAddModal()" class="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700">
+      + Add Application
+    </button>
+  </div>
+
+  <!-- Filter -->
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <button onclick="filterTracker('')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-brand-100 text-brand-700 font-medium">All</button>
+    <button onclick="filterTracker('Applied')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">Applied</button>
+    <button onclick="filterTracker('Phone Screen')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">Phone Screen</button>
+    <button onclick="filterTracker('Interview')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">Interview</button>
+    <button onclick="filterTracker('Offer')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">Offer</button>
+    <button onclick="filterTracker('Rejected')" class="tracker-filter px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">Rejected</button>
+  </div>
+
+  <div id="tracker-loading" class="hidden text-center py-8 text-gray-400 text-sm">Loading...</div>
+  <div id="tracker-table" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"></div>
+  <div id="tracker-empty" class="hidden bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm shadow-sm">
+    No applications yet. Start tracking your job applications!
+  </div>
+
+  <!-- Add Application Modal -->
+  <div id="add-app-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-semibold text-lg">Add Application</h3>
+        <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+      </div>
+      <div class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Job Title *</label>
+            <input id="new-title" type="text" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Company *</label>
+            <input id="new-company" type="text" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Job URL</label>
+          <input id="new-url" type="url" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Status</label>
+            <select id="new-status" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option>Applied</option>
+              <option>Phone Screen</option>
+              <option>Interview</option>
+              <option>Offer</option>
+              <option>Rejected</option>
+              <option>Withdrawn</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Location</label>
+            <input id="new-location" type="text" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Applied Date</label>
+            <input id="new-applied" type="date" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Follow-up Date</label>
+            <input id="new-followup" type="date" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Salary Range</label>
+          <input id="new-salary" type="text" placeholder="e.g. $80,000 - $100,000" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+          <textarea id="new-notes" rows="2" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <button onclick="submitNewApplication()" class="flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-brand-700">Save Application</button>
+        <button onclick="closeAddModal()" class="px-4 bg-white border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<script>
+// ========== STATE ==========
+const state = {
+  currentResume: null,
+  optimizedText: '',
+  currentJobForModal: null,
+  trackerFilter: '',
+};
+
+// ========== TAB NAVIGATION ==========
+function showTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('tab-active');
+    b.classList.add('text-gray-500');
+  });
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  const btn = document.getElementById('tab-btn-' + tab);
+  btn.classList.add('tab-active');
+  btn.classList.remove('text-gray-500');
+
+  if (tab === 'tracker') loadTracker();
+}
+
+// ========== INPUT MODE ==========
+function setInputMode(mode) {
+  document.getElementById('upload-mode').classList.toggle('hidden', mode !== 'upload');
+  document.getElementById('paste-mode').classList.toggle('hidden', mode !== 'paste');
+  document.querySelectorAll('.input-mode-btn').forEach(b => {
+    b.classList.remove('text-brand-600', 'border-brand-600');
+    b.classList.add('text-gray-400', 'border-transparent');
+  });
+  const active = document.getElementById('mode-' + mode);
+  active.classList.add('text-brand-600', 'border-brand-600');
+  active.classList.remove('text-gray-400', 'border-transparent');
+}
+
+// ========== RESUME UPLOAD ==========
+async function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  setUploadStatus('Parsing ' + file.name + '...', 'loading');
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const resp = await fetch('/api/resume/upload', { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Upload failed');
+    }
+    const data = await resp.json();
+    setResumeData(data);
+    setUploadStatus('Resume parsed successfully!', 'success');
+  } catch(e) {
+    setUploadStatus('Error: ' + e.message, 'error');
+  }
+}
+
+async function handlePasteSubmit() {
+  const text = document.getElementById('paste-input').value.trim();
+  if (!text) return;
+  setUploadStatus('Parsing resume...', 'loading');
+  try {
+    const resp = await fetch('/api/resume/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!resp.ok) throw new Error('Parse failed');
+    const data = await resp.json();
+    setResumeData(data);
+    setUploadStatus('Resume parsed!', 'success');
+  } catch(e) {
+    setUploadStatus('Error: ' + e.message, 'error');
+  }
+}
+
+function setUploadStatus(msg, type) {
+  const el = document.getElementById('upload-status');
+  const colors = { loading: 'text-blue-500', success: 'text-green-600', error: 'text-red-500' };
+  el.textContent = msg;
+  el.className = 'mt-3 text-sm ' + (colors[type] || 'text-gray-500');
+}
+
+function setResumeData(data) {
+  state.currentResume = data;
+  document.getElementById('parsed-empty').classList.add('hidden');
+  document.getElementById('parsed-result').classList.remove('hidden');
+
+  const c = data.contact || {};
+  document.getElementById('parsed-name').textContent = c.name || 'Name not detected';
+  document.getElementById('parsed-contact').textContent =
+    [c.email, c.phone, c.location, c.linkedin].filter(Boolean).join(' | ');
+
+  if (data.summary) {
+    document.getElementById('parsed-summary-block').classList.remove('hidden');
+    document.getElementById('parsed-summary').textContent = data.summary;
+  }
+
+  document.getElementById('exp-count').textContent = data.experience.length;
+  const expEl = document.getElementById('parsed-experience');
+  expEl.innerHTML = '';
+  data.experience.slice(0, 4).forEach(exp => {
+    const div = document.createElement('div');
+    div.className = 'text-sm bg-gray-50 rounded p-2';
+    div.innerHTML = `<div class="font-medium">${exp.title} <span class="text-gray-400">@ ${exp.company}</span></div>
+      <div class="text-xs text-gray-400">${exp.start_date || ''} – ${exp.end_date || ''} · ${exp.bullets.length} bullets</div>`;
+    expEl.appendChild(div);
+  });
+
+  const skillsEl = document.getElementById('parsed-skills');
+  skillsEl.innerHTML = '';
+  data.skills.slice(0, 20).forEach(skill => {
+    const span = document.createElement('span');
+    span.className = 'px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full';
+    span.textContent = skill;
+    skillsEl.appendChild(span);
+  });
+}
+
+// ========== ATS SCORE ==========
+async function runATSScore() {
+  if (!state.currentResume) {
+    alert('Please upload your resume first.');
+    return;
+  }
+  const jd = document.getElementById('jd-input').value.trim();
+  if (!jd) {
+    alert('Please paste a job description to score against.');
+    return;
+  }
+  document.getElementById('ats-result').classList.add('hidden');
+  document.getElementById('optimize-empty').classList.add('hidden');
+
+  const resp = await fetch('/api/resume/ats-score', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      resume_text: state.currentResume.raw_text,
+      job_description: jd,
+      use_claude: true,
+    }),
+  });
+  if (!resp.ok) { alert('ATS scoring failed'); return; }
+  const result = await resp.json();
+  renderATSResult(result);
+}
+
+function renderATSResult(r) {
+  document.getElementById('ats-result').classList.remove('hidden');
+  const score = r.score;
+  const circumference = 2 * Math.PI * 15.9;
+  const dash = (score / 100) * circumference;
+  document.getElementById('score-ring').setAttribute('stroke-dasharray', `${dash} ${circumference}`);
+  const color = score >= 70 ? '#16a34a' : score >= 50 ? '#d97706' : '#dc2626';
+  document.getElementById('score-ring').setAttribute('stroke', color);
+  document.getElementById('score-number').textContent = score;
+  document.getElementById('score-number').style.color = color;
+  document.getElementById('score-label').textContent =
+    score >= 70 ? 'Strong ATS match!' : score >= 50 ? 'Moderate match — optimize now' : 'Low match — significant gaps found';
+
+  // Section scores
+  const ss = r.section_scores || {};
+  document.getElementById('section-scores').innerHTML = Object.entries(ss).map(([k, v]) =>
+    `<div class="flex items-center gap-2 text-xs">
+      <span class="w-24 text-gray-400 capitalize">${k}</span>
+      <div class="flex-1 bg-gray-100 rounded-full h-1.5">
+        <div class="bg-brand-500 h-1.5 rounded-full" style="width:${v}%"></div>
+      </div>
+      <span class="w-8 text-right text-gray-500">${v}</span>
+    </div>`
+  ).join('');
+
+  const mkw = document.getElementById('matched-kw');
+  mkw.innerHTML = r.matched_keywords.slice(0, 15).map(k =>
+    `<span class="px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">${k}</span>`
+  ).join('');
+
+  const mskw = document.getElementById('missing-kw');
+  mskw.innerHTML = r.missing_keywords.slice(0, 15).map(k =>
+    `<span class="px-2 py-0.5 bg-red-50 text-red-600 text-xs rounded-full">${k}</span>`
+  ).join('');
+
+  document.getElementById('recommendations').innerHTML = r.recommendations.map(rec =>
+    `<div class="text-xs text-gray-600 bg-yellow-50 border border-yellow-100 rounded p-2">💡 ${rec}</div>`
+  ).join('');
+}
+
+// ========== RESUME OPTIMIZE ==========
+async function optimizeResume() {
+  if (!state.currentResume) { alert('Upload your resume first.'); return; }
+  const role = document.querySelector('input[name="target-role"]:checked')?.value || 'cybersecurity';
+  const jd = document.getElementById('jd-input').value.trim() || null;
+
+  const outBlock = document.getElementById('optimize-output-block');
+  const outPre = document.getElementById('optimize-output');
+  const status = document.getElementById('optimize-status');
+  document.getElementById('optimize-empty').classList.add('hidden');
+  outBlock.classList.remove('hidden');
+  outPre.textContent = '';
+  status.textContent = 'Generating...';
+  document.getElementById('download-btn').classList.add('hidden');
+  state.optimizedText = '';
+
+  await streamRequest('/api/resume/optimize', {
+    resume_data: state.currentResume,
+    target_role: role,
+    job_description: jd,
+  },
+  (chunk) => {
+    state.optimizedText += chunk;
+    outPre.textContent = state.optimizedText;
+    outPre.scrollTop = outPre.scrollHeight;
+  },
+  () => {
+    status.textContent = 'Done!';
+    document.getElementById('download-btn').classList.remove('hidden');
+  });
+}
+
+// ========== COVER LETTER ==========
+async function generateCoverLetter() {
+  if (!state.currentResume) { alert('Upload your resume first.'); return; }
+  const jd = document.getElementById('jd-input').value.trim();
+  if (!jd) { alert('Paste a job description to generate a targeted cover letter.'); return; }
+  const role = document.querySelector('input[name="target-role"]:checked')?.value || 'cybersecurity';
+
+  const clBlock = document.getElementById('cover-letter-block');
+  const clOut = document.getElementById('cover-letter-output');
+  document.getElementById('optimize-empty').classList.add('hidden');
+  clBlock.classList.remove('hidden');
+  clOut.textContent = '';
+  let clText = '';
+
+  await streamRequest('/api/resume/cover-letter', {
+    resume_data: state.currentResume,
+    job_title: 'the role',
+    company: 'the company',
+    job_description: jd,
+    target_role: role,
+  },
+  (chunk) => {
+    clText += chunk;
+    clOut.textContent = clText;
+    clOut.scrollTop = clOut.scrollHeight;
+  },
+  () => {});
+}
+
+function copyCoverLetter() {
+  const text = document.getElementById('cover-letter-output').textContent;
+  navigator.clipboard.writeText(text);
+}
+
+// ========== DOCX DOWNLOAD ==========
+async function downloadDocx() {
+  if (!state.optimizedText) return;
+  const resp = await fetch('/api/resume/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      optimized_text: state.optimizedText,
+      contact: state.currentResume?.contact || {},
+    }),
+  });
+  if (!resp.ok) { alert('Export failed'); return; }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'resume_optimized.docx';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ========== JOB SEARCH ==========
+async function searchJobs() {
+  const role = document.getElementById('job-role').value;
+  const location = document.getElementById('job-location').value || 'remote';
+  const salaryMin = parseInt(document.getElementById('job-salary').value) || 0;
+
+  document.getElementById('jobs-empty').classList.add('hidden');
+  document.getElementById('jobs-results').innerHTML = '';
+  document.getElementById('jobs-loading').classList.remove('hidden');
+
+  const resumeText = state.currentResume?.raw_text ? encodeURIComponent(state.currentResume.raw_text.slice(0, 2000)) : '';
+  const url = `/api/jobs/search?role=${role}&location=${encodeURIComponent(location)}&salary_min=${salaryMin}` +
+    (resumeText ? `&resume_text=${resumeText}` : '');
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Search failed');
+    const data = await resp.json();
+    document.getElementById('jobs-loading').classList.add('hidden');
+    renderJobResults(data.jobs, data.total);
+  } catch(e) {
+    document.getElementById('jobs-loading').classList.add('hidden');
+    document.getElementById('jobs-empty').classList.remove('hidden');
+    document.getElementById('jobs-empty').textContent = 'Search failed: ' + e.message;
+  }
+}
+
+function renderJobResults(jobs, total) {
+  const container = document.getElementById('jobs-results');
+  if (!jobs.length) {
+    document.getElementById('jobs-empty').classList.remove('hidden');
+    document.getElementById('jobs-empty').textContent = 'No jobs found. Try different search terms or check Adzuna API credentials.';
+    return;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'text-sm text-gray-500 mb-3';
+  header.textContent = `Found ${total} jobs — sorted by highest salary`;
+  container.appendChild(header);
+
+  jobs.forEach((job, i) => {
+    const salary = job.salary_min
+      ? `$${Math.round(job.salary_min/1000)}k` + (job.salary_max ? ` – $${Math.round(job.salary_max/1000)}k` : '+')
+      : 'Salary not listed';
+    const matchBadge = job.match_score != null
+      ? `<span class="px-2 py-0.5 text-xs rounded-full ${job.match_score >= 60 ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500'}">${job.match_score}% match</span>`
+      : '';
+    const sourceBadge = `<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500">${job.source}</span>`;
+
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow';
+    card.innerHTML = `
+      <div class="flex justify-between items-start gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-sm truncate">${job.title}</div>
+          <div class="text-xs text-gray-500 mt-0.5">${job.company} · ${job.location || 'Location not specified'}</div>
+          <div class="flex items-center gap-2 mt-2">
+            <span class="text-sm font-semibold text-green-600">${salary}</span>
+            ${matchBadge}
+            ${sourceBadge}
+          </div>
+          ${job.description ? `<p class="text-xs text-gray-400 mt-2 line-clamp-2">${job.description.slice(0, 120)}...</p>` : ''}
+        </div>
+        <div class="flex flex-col gap-1 flex-shrink-0">
+          <a href="${job.url}" target="_blank" rel="noopener"
+            class="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700 text-center">Apply</a>
+          <button onclick='openApplyModal(${JSON.stringify(job).replace(/'/g, "\\'")})'
+            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-50">Package</button>
+        </div>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+// ========== APPLY MODAL ==========
+function openApplyModal(job) {
+  if (!state.currentResume) { alert('Upload your resume first to generate an apply package.'); return; }
+  state.currentJobForModal = job;
+  document.getElementById('modal-job-title').textContent = job.title + ' @ ' + job.company;
+  document.getElementById('modal-cl-output').classList.add('hidden');
+  document.getElementById('modal-cl-loading').classList.remove('hidden');
+  document.getElementById('modal-cl-output').textContent = '';
+  document.getElementById('apply-modal').classList.remove('hidden');
+
+  const role = document.getElementById('job-role').value;
+  let clText = '';
+  streamRequest('/api/resume/cover-letter', {
+    resume_data: state.currentResume,
+    job_title: job.title,
+    company: job.company,
+    job_description: job.description || job.title + ' at ' + job.company,
+    target_role: role,
+  },
+  (chunk) => {
+    clText += chunk;
+    document.getElementById('modal-cl-output').textContent = clText;
+  },
+  () => {
+    document.getElementById('modal-cl-loading').classList.add('hidden');
+    document.getElementById('modal-cl-output').classList.remove('hidden');
+  });
+}
+
+function closeModal() {
+  document.getElementById('apply-modal').classList.add('hidden');
+}
+
+function copyModalCL() {
+  navigator.clipboard.writeText(document.getElementById('modal-cl-output').textContent);
+}
+
+async function addToTracker() {
+  const job = state.currentJobForModal;
+  if (!job) return;
+  const role = document.getElementById('job-role').value;
+  const salary = job.salary_min
+    ? `$${Math.round(job.salary_min/1000)}k` + (job.salary_max ? ` – $${Math.round(job.salary_max/1000)}k` : '+')
+    : null;
+
+  await fetch('/api/applications/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      job_title: job.title,
+      company: job.company,
+      url: job.url,
+      status: 'Applied',
+      location: job.location,
+      salary_range: salary,
+      target_role: role,
+      applied_date: new Date().toISOString(),
+    }),
+  });
+  closeModal();
+  alert('Added to Tracker!');
+}
+
+// ========== TRACKER ==========
+async function loadTracker() {
+  document.getElementById('tracker-loading').classList.remove('hidden');
+  document.getElementById('tracker-empty').classList.add('hidden');
+
+  // Load dashboard
+  try {
+    const dashResp = await fetch('/api/applications/dashboard');
+    const dash = await dashResp.json();
+    document.getElementById('stat-total').textContent = dash.total;
+    document.getElementById('stat-rate').textContent = Math.round(dash.response_rate * 100) + '%';
+    document.getElementById('stat-interviews').textContent = dash.interviews_scheduled;
+    document.getElementById('stat-offers').textContent = dash.offers;
+
+    if (dash.follow_ups_due?.length > 0) {
+      document.getElementById('followup-block').classList.remove('hidden');
+      document.getElementById('followup-list').innerHTML = dash.follow_ups_due.map(a =>
+        `<div class="text-sm text-amber-800">📅 <strong>${a.job_title}</strong> @ ${a.company} — follow up by ${fmtDate(a.follow_up_date)}</div>`
+      ).join('');
+    }
+  } catch(e) {}
+
+  // Load applications
+  const url = '/api/applications/' + (state.trackerFilter ? `?status=${encodeURIComponent(state.trackerFilter)}` : '');
+  try {
+    const resp = await fetch(url);
+    const apps = await resp.json();
+    document.getElementById('tracker-loading').classList.add('hidden');
+    renderTracker(apps);
+  } catch(e) {
+    document.getElementById('tracker-loading').classList.add('hidden');
+  }
+}
+
+function renderTracker(apps) {
+  const table = document.getElementById('tracker-table');
+  if (!apps.length) {
+    table.innerHTML = '';
+    document.getElementById('tracker-empty').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('tracker-empty').classList.add('hidden');
+
+  const statusColors = {
+    'Applied': 'bg-blue-50 text-blue-700',
+    'Phone Screen': 'bg-yellow-50 text-yellow-700',
+    'Interview': 'bg-purple-50 text-purple-700',
+    'Offer': 'bg-green-50 text-green-700',
+    'Rejected': 'bg-red-50 text-red-600',
+    'Withdrawn': 'bg-gray-100 text-gray-500',
+  };
+
+  table.innerHTML = `
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th class="text-left px-4 py-3 text-xs font-medium text-gray-500">Role</th>
+          <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 hidden md:table-cell">Company</th>
+          <th class="text-left px-4 py-3 text-xs font-medium text-gray-500">Status</th>
+          <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 hidden sm:table-cell">Applied</th>
+          <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 hidden lg:table-cell">Salary</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50">
+        ${apps.map(a => `
+          <tr class="hover:bg-gray-50 transition-colors" id="app-row-${a.id}">
+            <td class="px-4 py-3">
+              <div class="font-medium">${a.job_title}</div>
+              ${a.url ? `<a href="${a.url}" target="_blank" class="text-xs text-brand-600 hover:underline">View posting</a>` : ''}
+            </td>
+            <td class="px-4 py-3 text-gray-500 hidden md:table-cell">${a.company}</td>
+            <td class="px-4 py-3">
+              <select onchange="updateStatus(${a.id}, this.value)"
+                class="text-xs px-2 py-1 rounded-full border-0 ${statusColors[a.status] || 'bg-gray-100'} cursor-pointer">
+                <option ${a.status==='Applied'?'selected':''}>Applied</option>
+                <option ${a.status==='Phone Screen'?'selected':''}>Phone Screen</option>
+                <option ${a.status==='Interview'?'selected':''}>Interview</option>
+                <option ${a.status==='Offer'?'selected':''}>Offer</option>
+                <option ${a.status==='Rejected'?'selected':''}>Rejected</option>
+                <option ${a.status==='Withdrawn'?'selected':''}>Withdrawn</option>
+              </select>
+            </td>
+            <td class="px-4 py-3 text-gray-400 text-xs hidden sm:table-cell">${fmtDate(a.applied_date)}</td>
+            <td class="px-4 py-3 text-gray-500 text-xs hidden lg:table-cell">${a.salary_range || '—'}</td>
+            <td class="px-4 py-3">
+              <button onclick="deleteApp(${a.id})" class="text-xs text-red-400 hover:text-red-600">Delete</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function filterTracker(status) {
+  state.trackerFilter = status;
+  document.querySelectorAll('.tracker-filter').forEach(b => {
+    b.classList.remove('bg-brand-100', 'text-brand-700');
+    b.classList.add('bg-gray-100', 'text-gray-600');
+  });
+  event.target.classList.add('bg-brand-100', 'text-brand-700');
+  event.target.classList.remove('bg-gray-100', 'text-gray-600');
+  loadTracker();
+}
+
+async function updateStatus(id, status) {
+  await fetch(`/api/applications/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  loadTracker();
+}
+
+async function deleteApp(id) {
+  if (!confirm('Delete this application?')) return;
+  await fetch(`/api/applications/${id}`, { method: 'DELETE' });
+  loadTracker();
+}
+
+function openAddModal() {
+  document.getElementById('add-app-modal').classList.remove('hidden');
+  document.getElementById('new-applied').value = new Date().toISOString().split('T')[0];
+}
+function closeAddModal() {
+  document.getElementById('add-app-modal').classList.add('hidden');
+}
+
+async function submitNewApplication() {
+  const title = document.getElementById('new-title').value.trim();
+  const company = document.getElementById('new-company').value.trim();
+  if (!title || !company) { alert('Job title and company are required.'); return; }
+
+  const body = {
+    job_title: title,
+    company,
+    url: document.getElementById('new-url').value || null,
+    status: document.getElementById('new-status').value,
+    location: document.getElementById('new-location').value || null,
+    salary_range: document.getElementById('new-salary').value || null,
+    notes: document.getElementById('new-notes').value || null,
+    applied_date: document.getElementById('new-applied').value ? new Date(document.getElementById('new-applied').value).toISOString() : null,
+    follow_up_date: document.getElementById('new-followup').value ? new Date(document.getElementById('new-followup').value).toISOString() : null,
+  };
+
+  await fetch('/api/applications/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  closeAddModal();
+  loadTracker();
+}
+
+// ========== SSE STREAMING ==========
+async function streamRequest(url, body, onChunk, onDone) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || 'Request failed');
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    const lines = text.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') { onDone(); return; }
+        if (!data.startsWith('[ERROR]')) onChunk(data);
+      }
+    }
+  }
+  onDone();
+}
+
+// ========== HELPERS ==========
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Init
+showTab('resume');
+</script>
+</body>
+</html>

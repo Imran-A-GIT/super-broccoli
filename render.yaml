@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: careerlift
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false          # set manually in Render dashboard
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////data/applications.db
+    disk:
+      name: careerlift-data
+      mountPath: /data
+      sizeGB: 1              # 1 GB persistent disk for SQLite database
