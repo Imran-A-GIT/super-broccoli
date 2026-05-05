@@ -6,7 +6,8 @@ sse-starlette==3.4.1
 
 # Database
 sqlalchemy==2.0.49
-aiosqlite==0.22.1
+aiosqlite==0.22.1          # SQLite async driver (local dev)
+asyncpg==0.30.0            # PostgreSQL async driver (Railway/Render cloud DB)
 
 # AI
 anthropic==0.99.0

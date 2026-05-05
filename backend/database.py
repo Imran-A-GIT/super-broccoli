@@ -10,10 +10,19 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .config import settings
 
+# SQLite requires check_same_thread=False; PostgreSQL does not support it
+_connect_args = {"check_same_thread": False} if "sqlite" in settings.database_url else {}
+
+# Railway provides DATABASE_URL as postgres:// — SQLAlchemy needs postgresql+asyncpg://
+def _fix_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
 engine = create_async_engine(
-    settings.database_url,
+    _fix_url(settings.database_url),
     echo=False,
-    connect_args={"check_same_thread": False},
+    connect_args=_connect_args,
 )
 
 AsyncSessionLocal = async_sessionmaker(
