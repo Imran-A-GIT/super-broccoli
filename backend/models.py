@@ -65,6 +65,7 @@ class TargetRole(str, Enum):
     PRODUCT_OWNER = "product_owner"
     CYBERSECURITY = "cybersecurity"
     DATA_ANALYST = "data_analyst"
+    CUSTOM = "custom"
 
 
 class OptimizeRequest(BaseModel):

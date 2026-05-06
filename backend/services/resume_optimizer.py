@@ -153,15 +153,31 @@ REFRAMING GUIDE:
 """,
 }
 
+CUSTOM_SYSTEM_PROMPT = """CUSTOM ROLE OPTIMIZATION MODE
+
+A specific job description has been provided. Your primary guide is that job description.
+
+Your approach:
+1. Analyze the job description to extract required/preferred skills, responsibilities, and keywords
+2. Map the candidate's IT Operations experience to those specific requirements
+3. Use the employer's exact terminology where the experience genuinely matches
+4. Surface any experience that transfers to this specific role, even if indirect
+5. Prioritize and lead with the most relevant experience for this posting
+6. Naturally weave in keywords from the job description throughout the resume
+7. The job description drives every rewriting decision — tailor, don't generalize"""
+
 ROLE_LABELS: dict[str, str] = {
     "tech_sales": "Technical Sales / Solutions Engineer",
     "product_owner": "Product Owner / Product Manager",
     "cybersecurity": "Security Analyst / Cybersecurity Engineer",
     "data_analyst": "Data Analyst / Business Intelligence Analyst",
+    "custom": "the target role",
 }
 
 
 def _build_system_blocks(target_role: str) -> list[dict]:
+    if target_role == "custom":
+        return [{"type": "text", "text": BASE_SYSTEM_PROMPT + "\n\n" + CUSTOM_SYSTEM_PROMPT}]
     return [
         {"type": "text", "text": BASE_SYSTEM_PROMPT},
         {
@@ -337,7 +353,7 @@ async def generate_cover_letter_streaming(
     client: AsyncAnthropic,
     request: CoverLetterRequest,
 ) -> AsyncIterator[str]:
-    system_blocks = [
+    system_blocks: list[dict] = [
         {
             "type": "text",
             "text": "You are an expert cover letter writer specializing in IT-to-tech career transitions. "
@@ -345,12 +361,15 @@ async def generate_cover_letter_streaming(
             "Never use generic openers. Connect the candidate's IT Operations background to the role's needs. "
             "Output plain text only — no markdown, no bullet points in the cover letter itself.",
         },
-        {
-            "type": "text",
-            "text": ROLE_PROFILES[request.target_role],
-            "cache_control": {"type": "ephemeral"},
-        },
     ]
+    if request.target_role in ROLE_PROFILES:
+        system_blocks.append(
+            {
+                "type": "text",
+                "text": ROLE_PROFILES[request.target_role],
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
 
     user_prompt = _build_cover_letter_prompt(
         request.resume_data,

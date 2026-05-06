@@ -25,6 +25,8 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .fade-in { animation: fadeIn 0.3s ease-in; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    #location-dropdown button:hover { background-color: #eff6ff; color: #2563eb; }
+    #location-dropdown { border-radius: 0.5rem; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen text-gray-900">
@@ -142,31 +144,38 @@
         <h3 class="font-semibold mb-3">Target Role</h3>
         <div class="space-y-2">
           <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
-            <input type="radio" name="target-role" value="tech_sales" class="mt-1">
+            <input type="radio" name="target-role" value="tech_sales" class="mt-1" onchange="onRoleChange()">
             <div>
               <div class="text-sm font-medium">Tech Sales / Solutions Engineer</div>
               <div class="text-xs text-gray-400">Client-facing technical roles, presales</div>
             </div>
           </label>
           <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
-            <input type="radio" name="target-role" value="product_owner" class="mt-1">
+            <input type="radio" name="target-role" value="product_owner" class="mt-1" onchange="onRoleChange()">
             <div>
               <div class="text-sm font-medium">Product Owner / PM</div>
               <div class="text-xs text-gray-400">Agile product management, roadmaps</div>
             </div>
           </label>
           <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
-            <input type="radio" name="target-role" value="cybersecurity" class="mt-1" checked>
+            <input type="radio" name="target-role" value="cybersecurity" class="mt-1" checked onchange="onRoleChange()">
             <div>
               <div class="text-sm font-medium">Cybersecurity Analyst</div>
               <div class="text-xs text-gray-400">SOC, incident response, compliance</div>
             </div>
           </label>
           <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
-            <input type="radio" name="target-role" value="data_analyst" class="mt-1">
+            <input type="radio" name="target-role" value="data_analyst" class="mt-1" onchange="onRoleChange()">
             <div>
               <div class="text-sm font-medium">Data Analyst / BI</div>
               <div class="text-xs text-gray-400">SQL, dashboards, KPI reporting</div>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50 border-t border-dashed border-gray-100 mt-1 pt-2">
+            <input type="radio" name="target-role" value="custom" class="mt-1" onchange="onRoleChange()">
+            <div>
+              <div class="text-sm font-medium text-purple-700">Custom Role (any job)</div>
+              <div class="text-xs text-gray-400">Optimize for any pasted job description</div>
             </div>
           </label>
         </div>
@@ -174,10 +183,13 @@
 
       <!-- JD paste -->
       <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <h3 class="font-semibold mb-1">Job Description <span class="text-gray-400 text-xs font-normal">(optional)</span></h3>
+        <h3 class="font-semibold mb-1" id="jd-label">Job Description <span class="text-gray-400 text-xs font-normal">(optional)</span></h3>
         <p class="text-xs text-gray-400 mb-2">Paste for extra-targeted optimization</p>
         <textarea id="jd-input" rows="6" placeholder="Paste job description here..."
           class="w-full border border-gray-200 rounded-lg p-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+        <div id="custom-role-hint" class="hidden mt-2 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded p-2">
+          Custom mode: Resume will be rewritten specifically for this job description.
+        </div>
       </div>
 
       <!-- Action buttons -->
@@ -273,13 +285,15 @@
           <option value="data_analyst">Data Analyst / BI</option>
         </select>
       </div>
-      <div>
+      <div class="relative">
         <label class="block text-xs font-medium text-gray-500 mb-1">Location</label>
-        <input id="job-location" type="text" value="remote" placeholder="City, State or 'remote'"
-          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        <input id="job-location" type="text" value="remote" placeholder="City or 'remote'"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          autocomplete="off" oninput="onLocationInput(this.value)" onfocus="onLocationFocus(this.value)">
+        <div id="location-dropdown" class="hidden absolute z-20 w-full bg-white border border-gray-200 shadow-lg overflow-hidden" style="top:100%; margin-top:2px; border-radius:0.5rem;"></div>
       </div>
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Min Salary ($)</label>
+        <label id="salary-currency-label" class="block text-xs font-medium text-gray-500 mb-1">Min Salary (USD)</label>
         <input id="job-salary" type="number" value="70000" step="10000"
           class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
       </div>
@@ -452,6 +466,7 @@ const state = {
   optimizedText: '',
   currentJobForModal: null,
   trackerFilter: '',
+  currency: {symbol: '$', code: 'USD'},
 };
 
 // ========== TAB NAVIGATION ==========
@@ -638,6 +653,10 @@ async function optimizeResume() {
   if (!state.currentResume) { alert('Upload your resume first.'); return; }
   const role = document.querySelector('input[name="target-role"]:checked')?.value || 'cybersecurity';
   const jd = document.getElementById('jd-input').value.trim() || null;
+  if (role === 'custom' && !jd) {
+    alert('Custom role optimization requires a job description. Please paste the job posting first.');
+    return;
+  }
 
   const outBlock = document.getElementById('optimize-output-block');
   const outPre = document.getElementById('optimize-output');
@@ -761,9 +780,7 @@ function renderJobResults(jobs, total) {
   container.appendChild(header);
 
   jobs.forEach((job, i) => {
-    const salary = job.salary_min
-      ? `$${Math.round(job.salary_min/1000)}k` + (job.salary_max ? ` – $${Math.round(job.salary_max/1000)}k` : '+')
-      : 'Salary not listed';
+    const salary = formatSalary(job.salary_min, job.salary_max);
     const matchBadge = job.match_score != null
       ? `<span class="px-2 py-0.5 text-xs rounded-full ${job.match_score >= 60 ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500'}">${job.match_score}% match</span>`
       : '';
@@ -835,9 +852,7 @@ async function addToTracker() {
   const job = state.currentJobForModal;
   if (!job) return;
   const role = document.getElementById('job-role').value;
-  const salary = job.salary_min
-    ? `$${Math.round(job.salary_min/1000)}k` + (job.salary_max ? ` – $${Math.round(job.salary_max/1000)}k` : '+')
-    : null;
+  const salary = job.salary_min ? formatSalary(job.salary_min, job.salary_max) : null;
 
   await fetch('/api/applications/', {
     method: 'POST',
@@ -1042,6 +1057,114 @@ async function streamRequest(url, body, onChunk, onDone) {
   onDone();
 }
 
+// ========== CUSTOM ROLE TOGGLE ==========
+function onRoleChange() {
+  const role = document.querySelector('input[name="target-role"]:checked')?.value;
+  const hint = document.getElementById('custom-role-hint');
+  const jdLabel = document.getElementById('jd-label');
+  if (role === 'custom') {
+    hint.classList.remove('hidden');
+    jdLabel.innerHTML = 'Job Description <span class="text-purple-600 text-xs font-medium">(required for Custom)</span>';
+  } else {
+    hint.classList.add('hidden');
+    jdLabel.innerHTML = 'Job Description <span class="text-gray-400 text-xs font-normal">(optional)</span>';
+  }
+}
+
+// ========== LOCATION AUTOCOMPLETE ==========
+let _locTimer = null;
+
+function onLocationFocus(value) {
+  if (!value || value === 'remote') {
+    renderLocationDropdown([{label: '🌐 Remote (work from anywhere)', value: 'remote'}]);
+  } else {
+    onLocationInput(value);
+  }
+}
+
+function onLocationInput(value) {
+  clearTimeout(_locTimer);
+  if (!value) {
+    renderLocationDropdown([{label: '🌐 Remote (work from anywhere)', value: 'remote'}]);
+    return;
+  }
+  if (value.length < 2) {
+    document.getElementById('location-dropdown').classList.add('hidden');
+    return;
+  }
+  _locTimer = setTimeout(() => fetchLocationSuggestions(value), 300);
+}
+
+function renderLocationDropdown(items) {
+  const dd = document.getElementById('location-dropdown');
+  if (!items.length) { dd.classList.add('hidden'); return; }
+  dd.innerHTML = items.map(i =>
+    `<button type="button" onclick="selectLocation(${JSON.stringify(i.value)})"
+      class="w-full text-left px-3 py-2 text-sm border-b border-gray-50 last:border-0 transition-colors"
+      style="background:transparent" onmouseover="this.style.background='#eff6ff';this.style.color='#2563eb'" onmouseout="this.style.background='transparent';this.style.color=''">
+      ${i.label}
+    </button>`
+  ).join('');
+  dd.classList.remove('hidden');
+}
+
+async function fetchLocationSuggestions(query) {
+  const items = [{label: '🌐 Remote (work from anywhere)', value: 'remote'}];
+  try {
+    const resp = await fetch(`https://api.teleport.org/api/cities/?search=${encodeURIComponent(query)}&limit=5`);
+    const data = await resp.json();
+    const cities = data._embedded?.['city:search-results'] || [];
+    cities.forEach(c => items.push({label: '📍 ' + c.matching_full_name, value: c.matching_full_name}));
+  } catch(e) {}
+  renderLocationDropdown(items);
+}
+
+function selectLocation(value) {
+  document.getElementById('job-location').value = value;
+  document.getElementById('location-dropdown').classList.add('hidden');
+}
+
+document.addEventListener('click', function(e) {
+  const input = document.getElementById('job-location');
+  const dd = document.getElementById('location-dropdown');
+  if (input && dd && !input.contains(e.target) && !dd.contains(e.target)) {
+    dd.classList.add('hidden');
+  }
+});
+
+// ========== CURRENCY DETECTION ==========
+const CURRENCY_MAP = {
+  US:{symbol:'$',code:'USD'}, GB:{symbol:'£',code:'GBP'}, CA:{symbol:'CA$',code:'CAD'},
+  AU:{symbol:'A$',code:'AUD'}, NZ:{symbol:'NZ$',code:'NZD'}, SG:{symbol:'S$',code:'SGD'},
+  IN:{symbol:'₹',code:'INR'}, DE:{symbol:'€',code:'EUR'}, FR:{symbol:'€',code:'EUR'},
+  IT:{symbol:'€',code:'EUR'}, ES:{symbol:'€',code:'EUR'}, NL:{symbol:'€',code:'EUR'},
+  BE:{symbol:'€',code:'EUR'}, AT:{symbol:'€',code:'EUR'}, IE:{symbol:'€',code:'EUR'},
+  PT:{symbol:'€',code:'EUR'}, FI:{symbol:'€',code:'EUR'}, GR:{symbol:'€',code:'EUR'},
+  ZA:{symbol:'R',code:'ZAR'}, BR:{symbol:'R$',code:'BRL'}, MX:{symbol:'MX$',code:'MXN'},
+  AE:{symbol:'AED',code:'AED'}, JP:{symbol:'¥',code:'JPY'}, KR:{symbol:'₩',code:'KRW'},
+};
+
+async function detectCurrency() {
+  try {
+    const resp = await fetch('https://ipapi.co/json/');
+    const data = await resp.json();
+    const cur = CURRENCY_MAP[data.country_code];
+    if (cur) {
+      state.currency = cur;
+      const lbl = document.getElementById('salary-currency-label');
+      if (lbl) lbl.textContent = `Min Salary (${cur.code})`;
+    }
+  } catch(e) {}
+}
+
+function formatSalary(salaryMin, salaryMax) {
+  if (!salaryMin) return 'Salary not listed';
+  const sym = (state.currency || {symbol:'$'}).symbol;
+  const min = `${sym}${Math.round(salaryMin/1000)}k`;
+  const max = salaryMax ? ` – ${sym}${Math.round(salaryMax/1000)}k` : '+';
+  return min + max;
+}
+
 // ========== HELPERS ==========
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -1050,6 +1173,7 @@ function fmtDate(iso) {
 
 // Init
 showTab('resume');
+detectCurrency();
 </script>
 </body>
 </html>
