@@ -37,6 +37,11 @@ ROLE_SEARCH_TERMS: dict[str, list[str]] = {
         "reporting analyst",
         "BI analyst",
     ],
+    "custom": [
+        "technology professional",
+        "technical specialist",
+        "IT professional",
+    ],
 }
 
 MUSE_CATEGORY_MAP: dict[str, str] = {
@@ -46,12 +51,42 @@ MUSE_CATEGORY_MAP: dict[str, str] = {
     "data_analyst": "Data Science",
 }
 
+REMOTIVE_CATEGORY_MAP: dict[str, str] = {
+    "tech_sales": "sales",
+    "product_owner": "product",
+    "cybersecurity": "devops-sysadmin",
+    "data_analyst": "data",
+}
+
 _ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/us/search"
 _MUSE_BASE = "https://www.themuse.com/api/public/jobs"
+_REMOTIVE_BASE = "https://remotive.com/api/remote-jobs"
 
 
 def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", " ", text).strip()
+
+
+def _parse_salary_str(s: str) -> tuple[Optional[float], Optional[float]]:
+    """Parse salary strings like '$80k-$120k' or '80000-120000' → (min, max)."""
+    if not s:
+        return None, None
+    nums: list[float] = []
+    for m in re.finditer(r"[\d,]+\.?\d*k?", s.lower()):
+        part = m.group().replace(",", "")
+        if part.endswith("k"):
+            try:
+                nums.append(float(part[:-1]) * 1000)
+            except ValueError:
+                pass
+        else:
+            try:
+                n = float(part)
+                if n >= 10000:
+                    nums.append(n)
+            except ValueError:
+                pass
+    return (nums[0] if nums else None, nums[1] if len(nums) > 1 else None)
 
 
 async def search_adzuna(
@@ -125,12 +160,15 @@ async def search_muse(
         logger.warning("The Muse search failed: %s", exc)
         return []
 
-    # Filter by keyword relevance (Muse doesn't support keyword search in free API)
-    kw_lower = keywords.lower().split()
+    # Filter by keyword relevance — require the most specific word (first word) to appear in title
+    kw_parts = keywords.lower().split()
+    primary_kw = kw_parts[0]  # e.g. "security" from "security analyst"
+    full_phrase = keywords.lower()
     jobs: list[JobListing] = []
     for item in data.get("results", []):
         title = item.get("name", "")
-        if not any(kw in title.lower() for kw in kw_lower):
+        title_lower = title.lower()
+        if primary_kw not in title_lower and full_phrase not in title_lower:
             continue
         locs = item.get("locations", [])
         loc_name = locs[0]["name"] if locs else location
@@ -146,6 +184,43 @@ async def search_muse(
                 url=url,
                 description=contents,
                 source="muse",
+            )
+        )
+    return jobs
+
+
+async def search_remotive(
+    client: httpx.AsyncClient,
+    keywords: str,
+    role: str,
+    limit: int = 20,
+) -> list[JobListing]:
+    category = REMOTIVE_CATEGORY_MAP.get(role, "")
+    params: dict = {"search": keywords, "limit": limit}
+    if category:
+        params["category"] = category
+
+    try:
+        resp = await client.get(_REMOTIVE_BASE, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Remotive search failed: %s", exc)
+        return []
+
+    jobs: list[JobListing] = []
+    for item in data.get("jobs", []):
+        salary_min, salary_max = _parse_salary_str(item.get("salary", ""))
+        jobs.append(
+            JobListing(
+                title=item.get("title", ""),
+                company=item.get("company_name", "Unknown"),
+                location=item.get("candidate_required_location") or "Remote",
+                salary_min=salary_min,
+                salary_max=salary_max,
+                url=item.get("url", ""),
+                description=_strip_html(item.get("description", ""))[:500],
+                source="remotive",
             )
         )
     return jobs
@@ -183,7 +258,7 @@ async def search_jobs(
     muse_category = MUSE_CATEGORY_MAP.get(role, "IT")
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        adzuna_results, muse_results = await asyncio.gather(
+        adzuna_results, muse_results, remotive_results = await asyncio.gather(
             search_adzuna(
                 client,
                 adzuna_app_id,
@@ -194,9 +269,10 @@ async def search_jobs(
                 page=page,
             ),
             search_muse(client, primary_term, muse_category, location, page=page - 1),
+            search_remotive(client, primary_term, role),
         )
 
-    combined = _deduplicate(adzuna_results + muse_results)
+    combined = _deduplicate(adzuna_results + muse_results + remotive_results)
     sorted_jobs = _sort_by_salary(combined)
 
     if resume_text and sorted_jobs:
