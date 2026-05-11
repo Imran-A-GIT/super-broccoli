@@ -205,9 +205,29 @@ def _build_resume_user_prompt(resume_data: ResumeData, job_description: Optional
 
     cert_text = "\n".join(f"- {c}" for c in resume_data.certifications) or "None listed"
 
+    volunteer_text = ""
+    if resume_data.volunteer_experience:
+        for v in resume_data.volunteer_experience:
+            dates = f"{v.start_date or ''} – {v.end_date or ''}"
+            volunteer_text += f"\n### {v.title} | {v.company} | {dates}\n"
+            volunteer_text += "\n".join(f"- {b}" for b in v.bullets) or ""
+
+    extras: list[str] = []
+    if resume_data.projects:
+        extras.append(f"PROJECTS: {', '.join(resume_data.projects[:8])}")
+    if resume_data.languages:
+        extras.append(f"LANGUAGES: {', '.join(resume_data.languages)}")
+    if resume_data.interests:
+        extras.append(f"INTERESTS: {', '.join(resume_data.interests[:6])}")
+    if resume_data.awards:
+        extras.append(f"AWARDS: {', '.join(resume_data.awards[:5])}")
+
     jd_block = ""
     if job_description:
         jd_block = f"\n--- TARGET JOB DESCRIPTION ---\n{job_description[:2000]}\n--- END JOB DESCRIPTION ---\n"
+
+    volunteer_block = f"\nVOLUNTEER EXPERIENCE:{volunteer_text}\n" if volunteer_text else ""
+    extras_block = ("\n" + "\n".join(extras)) if extras else ""
 
     return f"""Here is the candidate's resume:
 
@@ -220,14 +240,14 @@ CURRENT SUMMARY:
 
 WORK EXPERIENCE:
 {exp_text}
-
+{volunteer_block}
 SKILLS: {', '.join(resume_data.skills) or 'Not listed'}
 
 EDUCATION:
 {edu_text}
 
 CERTIFICATIONS:
-{cert_text}
+{cert_text}{extras_block}
 --- END RESUME ---
 {jd_block}
 
@@ -237,6 +257,7 @@ Your task:
 3. Strengthen and quantify bullet points (use [X] or [N] as a placeholder where a number is needed)
 4. Add role-appropriate keywords naturally within existing experience descriptions
 5. Rewrite the summary to reflect the target role transition (2-3 sentences, no first-person pronouns)
+6. Include volunteer experience, projects, languages, interests, and awards if present
 
 Output the complete rewritten resume using EXACTLY this structure (no other text before or after):
 
@@ -255,6 +276,11 @@ Output the complete rewritten resume using EXACTLY this structure (no other text
 - [rewritten bullet]
 [repeat for all roles]
 
+## VOLUNTEER EXPERIENCE
+### [Role] | [Organization] | [Dates]
+- [bullet]
+[omit section if none]
+
 ## SKILLS
 [Comma-separated skills, adding role-relevant terms where genuine]
 
@@ -263,6 +289,14 @@ Output the complete rewritten resume using EXACTLY this structure (no other text
 
 ## CERTIFICATIONS
 - [cert]
+[omit section if none]
+
+## PROJECTS
+[project names relevant to target role, comma-separated]
+[omit section if none]
+
+## AWARDS
+- [award]
 [omit section if none]
 """
 
