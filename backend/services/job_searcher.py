@@ -58,9 +58,30 @@ REMOTIVE_CATEGORY_MAP: dict[str, str] = {
     "data_analyst": "data",
 }
 
-_ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/us/search"
+JOBICY_TAG_MAP: dict[str, str] = {
+    "tech_sales": "sales-engineer",
+    "product_owner": "product-manager",
+    "cybersecurity": "security",
+    "data_analyst": "data-analytics",
+    "custom": "",
+}
+
+_ADZUNA_US_BASE = "https://api.adzuna.com/v1/api/jobs/us/search"
+_ADZUNA_CA_BASE = "https://api.adzuna.com/v1/api/jobs/ca/search"
 _MUSE_BASE = "https://www.themuse.com/api/public/jobs"
 _REMOTIVE_BASE = "https://remotive.com/api/remote-jobs"
+_JOBICY_BASE = "https://jobicy.com/api/v2/remote-jobs"
+
+_REMOTE_LOCATIONS = frozenset(
+    {"remote", "us", "usa", "united states", "anywhere", "worldwide", ""}
+)
+_CANADA_CITIES = frozenset({
+    "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton",
+    "winnipeg", "hamilton", "quebec", "victoria", "canada",
+})
+
+# Words to exclude from title-relevance filter
+_FILTER_STOP = frozenset({"of", "and", "the", "or", "a", "an", "in", "at", "for"})
 
 
 def _strip_html(text: str) -> str:
@@ -89,6 +110,13 @@ def _parse_salary_str(s: str) -> tuple[Optional[float], Optional[float]]:
     return (nums[0] if nums else None, nums[1] if len(nums) > 1 else None)
 
 
+def _adzuna_base(location: str) -> str:
+    loc = (location or "").lower()
+    if any(c in loc for c in _CANADA_CITIES):
+        return _ADZUNA_CA_BASE
+    return _ADZUNA_US_BASE
+
+
 async def search_adzuna(
     client: httpx.AsyncClient,
     app_id: str,
@@ -97,7 +125,7 @@ async def search_adzuna(
     location: str,
     salary_min: int,
     page: int = 1,
-    results_per_page: int = 20,
+    results_per_page: int = 50,
 ) -> list[JobListing]:
     if not app_id or not app_key:
         return []
@@ -107,32 +135,26 @@ async def search_adzuna(
         "app_key": app_key,
         "what": keywords,
         "where": location or "united states",
-        "salary_min": salary_min if salary_min > 0 else "",
         "results_per_page": results_per_page,
         "content-type": "application/json",
     }
+    if salary_min > 0:
+        params["salary_min"] = salary_min
     params = {k: v for k, v in params.items() if v != ""}
 
     try:
-        resp = await client.get(f"{_ADZUNA_BASE}/{page}", params=params)
+        resp = await client.get(f"{_adzuna_base(location)}/{page}", params=params)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
         logger.warning("Adzuna search failed: %s", exc)
         return []
 
-    # Filter by title relevance: require at least one keyword word to appear in title
-    kw_parts = keywords.lower().split()
-
     jobs: list[JobListing] = []
     for item in data.get("results", []):
-        title = item.get("title", "")
-        title_lower = title.lower()
-        if not any(kw in title_lower for kw in kw_parts):
-            continue
         jobs.append(
             JobListing(
-                title=title,
+                title=item.get("title", ""),
                 company=item.get("company", {}).get("display_name", "Unknown"),
                 location=item.get("location", {}).get("display_name"),
                 salary_min=item.get("salary_min"),
@@ -152,10 +174,7 @@ async def search_muse(
     location: str,
     page: int = 0,
 ) -> list[JobListing]:
-    params = {
-        "page": page,
-        "category": category,
-    }
+    params: dict = {"page": page, "category": category}
     if location and location.lower() not in ("remote", "us", "usa", "united states"):
         params["location"] = location
 
@@ -167,9 +186,8 @@ async def search_muse(
         logger.warning("The Muse search failed: %s", exc)
         return []
 
-    # Filter by keyword relevance — require the most specific word (first word) to appear in title
     kw_parts = keywords.lower().split()
-    primary_kw = kw_parts[0]  # e.g. "security" from "security analyst"
+    primary_kw = kw_parts[0]
     full_phrase = keywords.lower()
     jobs: list[JobListing] = []
     for item in data.get("results", []):
@@ -200,7 +218,7 @@ async def search_remotive(
     client: httpx.AsyncClient,
     keywords: str,
     role: str,
-    limit: int = 20,
+    limit: int = 50,
 ) -> list[JobListing]:
     category = REMOTIVE_CATEGORY_MAP.get(role, "")
     params: dict = {"search": keywords, "limit": limit}
@@ -233,6 +251,59 @@ async def search_remotive(
     return jobs
 
 
+async def search_jobicy(
+    client: httpx.AsyncClient,
+    role: str,
+    limit: int = 50,
+) -> list[JobListing]:
+    """Jobicy — free remote job board with good salary data, no API key needed."""
+    tag = JOBICY_TAG_MAP.get(role, "")
+    params: dict = {"count": limit}
+    if tag:
+        params["tag"] = tag
+
+    try:
+        resp = await client.get(_JOBICY_BASE, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Jobicy search failed: %s", exc)
+        return []
+
+    jobs: list[JobListing] = []
+    for item in data.get("jobs", []):
+        salary_min_val = None
+        salary_max_val = None
+        salary_type = (item.get("salaryType") or "").lower()
+        for field, target in [("salaryMin", "min"), ("salaryMax", "max")]:
+            raw = item.get(field)
+            if raw:
+                try:
+                    val = float(str(raw).replace(",", "").replace("$", ""))
+                    if "hour" in salary_type:
+                        val *= 2080  # Convert hourly → annual
+                    if target == "min":
+                        salary_min_val = val
+                    else:
+                        salary_max_val = val
+                except (ValueError, TypeError):
+                    pass
+
+        jobs.append(
+            JobListing(
+                title=item.get("jobTitle", ""),
+                company=item.get("companyName", "Unknown"),
+                location=item.get("jobGeo") or "Remote",
+                salary_min=salary_min_val,
+                salary_max=salary_max_val,
+                url=item.get("url", ""),
+                description=_strip_html(item.get("jobDescription", ""))[:500],
+                source="jobicy",
+            )
+        )
+    return jobs
+
+
 def _deduplicate(jobs: list[JobListing]) -> list[JobListing]:
     seen: set[tuple[str, str]] = set()
     unique: list[JobListing] = []
@@ -251,11 +322,6 @@ def _sort_by_salary(jobs: list[JobListing]) -> list[JobListing]:
     )
 
 
-_REMOTE_LOCATIONS = frozenset(
-    {"remote", "us", "usa", "united states", "anywhere", "worldwide", ""}
-)
-
-
 async def search_jobs(
     role: str,
     location: str,
@@ -266,30 +332,49 @@ async def search_jobs(
     adzuna_app_key: str,
 ) -> JobSearchResult:
     terms = ROLE_SEARCH_TERMS.get(role, ["technology professional"])
-    primary_term = terms[0]
     muse_category = MUSE_CATEGORY_MAP.get(role, "IT")
+    include_remote = (location or "").lower().strip() in _REMOTE_LOCATIONS
 
-    # Remotive is a remote-only board — only include it when location is remote/US
-    include_remotive = (location or "").lower().strip() in _REMOTE_LOCATIONS
+    # Build title-relevance filter from ALL search terms for this role
+    filter_kw: set[str] = set()
+    for term in terms:
+        filter_kw.update(term.lower().split())
+    filter_kw -= _FILTER_STOP
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        tasks = [
-            search_adzuna(client, adzuna_app_id, adzuna_app_key, primary_term, location, salary_min, page=page),
-            search_muse(client, primary_term, muse_category, location, page=page - 1),
-        ]
-        if include_remotive:
-            tasks.append(search_remotive(client, primary_term, role))
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        tasks: list = []
 
-        results = await asyncio.gather(*tasks)
+        # Adzuna: search first 3 role terms in parallel (50 results each)
+        for term in terms[:3]:
+            tasks.append(
+                search_adzuna(client, adzuna_app_id, adzuna_app_key, term,
+                              location, salary_min, page=1, results_per_page=50)
+            )
 
-    adzuna_results = results[0]
-    muse_results = results[1]
-    remotive_results = results[2] if include_remotive else []
+        # The Muse: 3 pages in parallel (no salary, but good volume)
+        for pg in range(3):
+            tasks.append(search_muse(client, terms[0], muse_category, location, page=pg))
 
-    combined = _deduplicate(adzuna_results + muse_results + remotive_results)
+        # Remote-only boards — only when user is searching remote/US
+        if include_remote:
+            tasks.append(search_remotive(client, terms[0], role, limit=50))
+            tasks.append(search_jobicy(client, role, limit=50))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_jobs: list[JobListing] = []
+    for r in results:
+        if isinstance(r, list):
+            all_jobs.extend(r)
+
+    # Title relevance filter: drop jobs where none of the role keywords appear in title
+    if filter_kw:
+        all_jobs = [j for j in all_jobs if any(kw in j.title.lower() for kw in filter_kw)]
+
+    combined = _deduplicate(all_jobs)
     sorted_jobs = _sort_by_salary(combined)
 
-    # Filter out jobs explicitly below the salary minimum (keep jobs with no salary info)
+    # Filter out jobs with known salary below the user's minimum
     if salary_min > 0:
         sorted_jobs = [
             j for j in sorted_jobs
