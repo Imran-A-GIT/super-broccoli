@@ -244,6 +244,11 @@ def _sort_by_salary(jobs: list[JobListing]) -> list[JobListing]:
     )
 
 
+_REMOTE_LOCATIONS = frozenset(
+    {"remote", "us", "usa", "united states", "anywhere", "worldwide", ""}
+)
+
+
 async def search_jobs(
     role: str,
     location: str,
@@ -257,23 +262,32 @@ async def search_jobs(
     primary_term = terms[0]
     muse_category = MUSE_CATEGORY_MAP.get(role, "IT")
 
+    # Remotive is a remote-only board — only include it when location is remote/US
+    include_remotive = (location or "").lower().strip() in _REMOTE_LOCATIONS
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        adzuna_results, muse_results, remotive_results = await asyncio.gather(
-            search_adzuna(
-                client,
-                adzuna_app_id,
-                adzuna_app_key,
-                primary_term,
-                location,
-                salary_min,
-                page=page,
-            ),
+        tasks = [
+            search_adzuna(client, adzuna_app_id, adzuna_app_key, primary_term, location, salary_min, page=page),
             search_muse(client, primary_term, muse_category, location, page=page - 1),
-            search_remotive(client, primary_term, role),
-        )
+        ]
+        if include_remotive:
+            tasks.append(search_remotive(client, primary_term, role))
+
+        results = await asyncio.gather(*tasks)
+
+    adzuna_results = results[0]
+    muse_results = results[1]
+    remotive_results = results[2] if include_remotive else []
 
     combined = _deduplicate(adzuna_results + muse_results + remotive_results)
     sorted_jobs = _sort_by_salary(combined)
+
+    # Filter out jobs explicitly below the salary minimum (keep jobs with no salary info)
+    if salary_min > 0:
+        sorted_jobs = [
+            j for j in sorted_jobs
+            if j.salary_min is None or j.salary_min >= salary_min
+        ]
 
     if resume_text and sorted_jobs:
         for job in sorted_jobs:

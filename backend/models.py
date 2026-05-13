@@ -35,9 +35,14 @@ class ResumeData(BaseModel):
     contact: ContactInfo = ContactInfo()
     summary: Optional[str] = None
     experience: list[WorkExperience] = []
+    volunteer_experience: list[WorkExperience] = []
+    projects: list[str] = []
     skills: list[str] = []
     education: list[Education] = []
     certifications: list[str] = []
+    languages: list[str] = []
+    interests: list[str] = []
+    awards: list[str] = []
     raw_text: str = ""
 
 

@@ -27,6 +27,17 @@
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     #location-dropdown button:hover { background-color: #eff6ff; color: #2563eb; }
     #location-dropdown { border-radius: 0.5rem; }
+    @media print {
+      body > *:not(#print-resume-content) { display: none !important; }
+      #print-resume-content { display: block !important; position: static !important; }
+      header, #boost-modal > div > *:not(#print-resume-content) { display: none !important; }
+    }
+    #print-resume-content { display: none; }
+    .resume-preview h2 { font-size: 1.1rem; font-weight: 700; border-bottom: 1.5px solid #2563eb; padding-bottom: 2px; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; color: #1e3a5f; }
+    .resume-preview h3 { font-size: 0.9rem; font-weight: 600; margin: 8px 0 2px; }
+    .resume-preview ul { margin: 2px 0 6px 16px; }
+    .resume-preview li { font-size: 0.8rem; margin: 1px 0; }
+    .resume-preview p { font-size: 0.85rem; margin: 4px 0; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen text-gray-900">
@@ -39,7 +50,10 @@
         <span class="text-2xl font-bold text-brand-600">CareerLift</span>
         <span class="text-sm text-gray-400 hidden sm:block">AI Resume & Job Tool for IT Pros</span>
       </div>
-      <div id="api-status" class="text-xs text-gray-400"></div>
+      <div class="flex items-center gap-3">
+        <button onclick="openProfileModal()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg font-medium transition-colors">My Profile</button>
+        <div id="api-status" class="text-xs text-gray-400"></div>
+      </div>
     </div>
     <!-- Tabs -->
     <nav class="flex gap-0 -mb-px">
@@ -129,6 +143,41 @@
           <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Skills</div>
           <div id="parsed-skills" class="flex flex-wrap gap-1"></div>
         </div>
+        <!-- Education -->
+        <div id="parsed-edu-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Education</div>
+          <div id="parsed-education" class="space-y-1"></div>
+        </div>
+        <!-- Certifications -->
+        <div id="parsed-certs-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Certifications</div>
+          <div id="parsed-certs" class="flex flex-wrap gap-1"></div>
+        </div>
+        <!-- Volunteer Experience -->
+        <div id="parsed-volunteer-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Volunteer Experience</div>
+          <div id="parsed-volunteer" class="space-y-2"></div>
+        </div>
+        <!-- Projects -->
+        <div id="parsed-projects-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Projects</div>
+          <div id="parsed-projects" class="flex flex-wrap gap-1"></div>
+        </div>
+        <!-- Languages -->
+        <div id="parsed-languages-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Languages</div>
+          <div id="parsed-languages" class="flex flex-wrap gap-1"></div>
+        </div>
+        <!-- Interests -->
+        <div id="parsed-interests-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Interests & Hobbies</div>
+          <div id="parsed-interests" class="flex flex-wrap gap-1"></div>
+        </div>
+        <!-- Awards -->
+        <div id="parsed-awards-block" class="hidden">
+          <div class="text-xs font-semibold uppercase text-gray-400 mb-2">Awards & Recognition</div>
+          <div id="parsed-awards" class="flex flex-wrap gap-1"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -194,6 +243,10 @@
 
       <!-- Action buttons -->
       <div class="space-y-2">
+        <button onclick="resumeBoost()"
+          class="w-full bg-gradient-to-r from-purple-600 to-brand-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:from-purple-700 hover:to-brand-700 transition-all shadow-sm">
+          ⚡ Resume Boost (ATS + PDF)
+        </button>
         <button onclick="runATSScore()"
           class="w-full bg-white border border-brand-600 text-brand-600 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 transition-colors">
           Score ATS Match
@@ -306,14 +359,20 @@
     </div>
   </div>
 
+  <div id="profile-setup-bar" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+    <div class="text-sm text-blue-700">Set up your Quick Apply Profile to auto-fill job applications</div>
+    <button onclick="openProfileModal()" class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">Set Up Profile</button>
+  </div>
+
   <div id="jobs-loading" class="hidden text-center py-12 text-gray-400">
     <div class="inline-block w-8 h-8 border-4 border-brand-200 border-t-brand-600 rounded-full spinner mb-3"></div>
     <div class="text-sm">Searching job boards...</div>
   </div>
 
   <div id="jobs-results" class="space-y-3"></div>
-  <div id="jobs-empty" class="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm shadow-sm">
-    Use the search above to find high-paying jobs matching your target role
+  <div id="jobs-empty" class="bg-white rounded-xl border border-gray-200 p-12 text-center shadow-sm">
+    <div class="text-gray-400 text-sm mb-3">Search for jobs above, or explore these boards directly:</div>
+    <div class="flex flex-wrap justify-center gap-2 mt-2" id="job-board-links"></div>
   </div>
 
   <!-- Apply Package Modal -->
@@ -457,9 +516,173 @@
   </div>
 </div>
 
+<!-- Resume Boost Modal -->
+<div id="boost-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-xl">
+    <div class="flex justify-between items-center p-5 border-b border-gray-100">
+      <div>
+        <h3 class="font-bold text-lg">Resume Boost Preview</h3>
+        <div id="boost-score-bar" class="flex items-center gap-3 mt-1"></div>
+      </div>
+      <button onclick="closeBoostModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="overflow-y-auto flex-1 p-6">
+      <div id="boost-loading" class="text-center py-16 text-gray-400">
+        <div class="inline-block w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full spinner mb-3"></div>
+        <div class="text-sm font-medium">Boosting resume for ATS...</div>
+        <div class="text-xs mt-1">Analyzing job description and optimizing...</div>
+      </div>
+      <div id="print-resume-content" class="resume-preview hidden"></div>
+    </div>
+    <div class="p-4 border-t border-gray-100 flex gap-2 bg-gray-50 rounded-b-xl">
+      <button onclick="printResume()" id="boost-print-btn" class="hidden flex-1 bg-purple-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-purple-700">Save as PDF</button>
+      <button onclick="downloadBoostDocx()" id="boost-docx-btn" class="hidden flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-brand-700">Download DOCX</button>
+      <button onclick="applyWithBoostedResume()" id="boost-apply-btn" class="hidden flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-green-700">Apply Now</button>
+      <button onclick="closeBoostModal()" class="px-4 bg-white border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Apply Modal -->
+<div id="quick-apply-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+    <div class="flex justify-between items-center p-5 border-b border-gray-100">
+      <div>
+        <h3 class="font-bold text-lg" id="qa-job-title">Quick Apply</h3>
+        <div class="text-xs text-gray-400 mt-0.5" id="qa-job-company"></div>
+      </div>
+      <button onclick="closeQuickApply()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <!-- Auto-filled details -->
+      <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+        <div class="text-xs font-semibold text-green-700 mb-2">Auto-Filled from Your Profile & Resume</div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div><span class="text-gray-500">Name:</span> <span id="qa-name" class="font-medium"></span></div>
+          <div><span class="text-gray-500">Email:</span> <span id="qa-email" class="font-medium"></span></div>
+          <div><span class="text-gray-500">Phone:</span> <span id="qa-phone" class="font-medium"></span></div>
+          <div><span class="text-gray-500">Location:</span> <span id="qa-location" class="font-medium"></span></div>
+          <div><span class="text-gray-500">LinkedIn:</span> <span id="qa-linkedin" class="font-medium text-brand-600 truncate"></span></div>
+          <div><span class="text-gray-500">Work Auth:</span> <span id="qa-work-auth" class="font-medium"></span></div>
+        </div>
+      </div>
+      <!-- Cover letter -->
+      <div>
+        <div class="text-xs font-semibold text-gray-500 uppercase mb-1">Tailored Cover Letter</div>
+        <div id="qa-cl-loading" class="text-center py-6 text-gray-400 text-sm">
+          <div class="inline-block w-5 h-5 border-3 border-brand-200 border-t-brand-600 rounded-full spinner mr-2"></div>
+          Generating...
+        </div>
+        <pre id="qa-cl-output" class="hidden text-xs bg-gray-50 rounded-lg p-3 text-gray-700 font-sans max-h-48 overflow-y-auto"></pre>
+      </div>
+      <!-- Actions -->
+      <div class="flex flex-col gap-2">
+        <button id="qa-open-btn" onclick="openJobApplication()" class="w-full bg-brand-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-brand-700">Open Application Page</button>
+        <button onclick="copyQuickApplyPackage()" class="w-full bg-white border border-gray-200 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">Copy All Application Details</button>
+        <div class="grid grid-cols-3 gap-2">
+          <a id="qa-linkedin-search" href="#" target="_blank" class="text-center text-xs bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">LinkedIn</a>
+          <a id="qa-indeed-search" href="#" target="_blank" class="text-center text-xs bg-blue-400 text-white py-2 rounded-lg hover:bg-blue-500">Indeed</a>
+          <a id="qa-google-search" href="#" target="_blank" class="text-center text-xs bg-gray-700 text-white py-2 rounded-lg hover:bg-gray-800">Google Jobs</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div id="profile-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg">My Quick Apply Profile</h3>
+      <button onclick="closeProfileModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+    </div>
+    <p class="text-xs text-gray-400 mb-4">Saved locally on your device. Used to auto-fill job applications.</p>
+    <div class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Full Name</label>
+          <input id="profile-name" type="text" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Email</label>
+          <input id="profile-email" type="email" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Phone</label>
+          <input id="profile-phone" type="tel" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Location (City, State)</label>
+          <input id="profile-location" type="text" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">LinkedIn URL</label>
+        <input id="profile-linkedin" type="url" placeholder="https://linkedin.com/in/yourname" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Portfolio / GitHub URL</label>
+        <input id="profile-website" type="url" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Work Authorization</label>
+          <select id="profile-work-auth" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <option value="US Citizen">US Citizen</option>
+            <option value="Green Card">Green Card</option>
+            <option value="H-1B Visa">H-1B Visa</option>
+            <option value="OPT/CPT">OPT/CPT</option>
+            <option value="Open to Sponsorship">Open to Sponsorship</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Years of Experience</label>
+          <input id="profile-experience" type="number" min="0" max="50" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Desired Salary Range</label>
+          <input id="profile-salary" type="text" placeholder="e.g. $80k - $110k" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Availability to Start</label>
+          <select id="profile-start" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <option>Immediately</option>
+            <option>2 weeks notice</option>
+            <option>1 month</option>
+            <option>2 months</option>
+            <option>3 months</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Professional Summary (for applications)</label>
+        <textarea id="profile-summary" rows="3" class="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" placeholder="Brief summary for job applications..."></textarea>
+      </div>
+    </div>
+    <div class="mt-5 flex gap-2">
+      <button onclick="saveProfile()" class="flex-1 bg-brand-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-brand-700">Save Profile</button>
+      <button onclick="closeProfileModal()" class="px-4 bg-white border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script>
+// ========== ROLE SEARCH TERMS ==========
+const ROLE_SEARCH_TERMS_FRONTEND = {
+  tech_sales: ['solutions engineer', 'sales engineer'],
+  product_owner: ['product owner', 'product manager'],
+  cybersecurity: ['security analyst', 'SOC analyst'],
+  data_analyst: ['data analyst', 'business intelligence analyst'],
+  custom: ['technology professional'],
+};
+
 // ========== STATE ==========
 const state = {
   currentResume: null,
@@ -559,25 +782,104 @@ function setResumeData(data) {
     document.getElementById('parsed-summary').textContent = data.summary;
   }
 
+  // Experience — show ALL, sorted by date (backend already sorts)
   document.getElementById('exp-count').textContent = data.experience.length;
   const expEl = document.getElementById('parsed-experience');
   expEl.innerHTML = '';
-  data.experience.slice(0, 4).forEach(exp => {
+  (data.experience || []).forEach(exp => {
     const div = document.createElement('div');
-    div.className = 'text-sm bg-gray-50 rounded p-2';
-    div.innerHTML = `<div class="font-medium">${exp.title} <span class="text-gray-400">@ ${exp.company}</span></div>
-      <div class="text-xs text-gray-400">${exp.start_date || ''} – ${exp.end_date || ''} · ${exp.bullets.length} bullets</div>`;
+    div.className = 'text-sm bg-gray-50 rounded-lg p-3 border border-gray-100';
+    div.innerHTML = `
+      <div class="font-medium">${exp.title} <span class="text-gray-400 font-normal">@ ${exp.company}</span></div>
+      <div class="text-xs text-gray-400 mt-0.5">${[exp.start_date, exp.end_date].filter(Boolean).join(' – ')}${exp.bullets.length ? ` · ${exp.bullets.length} bullet points` : ''}</div>
+      ${exp.bullets.slice(0,2).map(b => `<div class="text-xs text-gray-500 mt-1 pl-2 border-l-2 border-gray-200">${b.slice(0,100)}${b.length > 100 ? '…' : ''}</div>`).join('')}`;
     expEl.appendChild(div);
   });
 
+  // Skills
   const skillsEl = document.getElementById('parsed-skills');
   skillsEl.innerHTML = '';
-  data.skills.slice(0, 20).forEach(skill => {
+  (data.skills || []).slice(0, 30).forEach(skill => {
     const span = document.createElement('span');
     span.className = 'px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full';
     span.textContent = skill;
     skillsEl.appendChild(span);
   });
+
+  // Education
+  if (data.education?.length) {
+    document.getElementById('parsed-edu-block').classList.remove('hidden');
+    document.getElementById('parsed-education').innerHTML = data.education.map(e =>
+      `<div class="text-sm bg-gray-50 rounded p-2 border border-gray-100">
+        <div class="font-medium">${e.degree}</div>
+        <div class="text-xs text-gray-400">${e.institution}${e.year ? ' · ' + e.year : ''}</div>
+      </div>`
+    ).join('');
+  }
+
+  // Certifications
+  if (data.certifications?.length) {
+    document.getElementById('parsed-certs-block').classList.remove('hidden');
+    document.getElementById('parsed-certs').innerHTML = data.certifications.slice(0,15).map(c =>
+      `<span class="px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">${c}</span>`
+    ).join('');
+  }
+
+  // Volunteer Experience
+  if (data.volunteer_experience?.length) {
+    document.getElementById('parsed-volunteer-block').classList.remove('hidden');
+    document.getElementById('parsed-volunteer').innerHTML = data.volunteer_experience.map(exp =>
+      `<div class="text-sm bg-orange-50 rounded-lg p-3 border border-orange-100">
+        <div class="font-medium">${exp.title} <span class="text-gray-400 font-normal">@ ${exp.company}</span></div>
+        <div class="text-xs text-gray-400">${[exp.start_date, exp.end_date].filter(Boolean).join(' – ')}</div>
+      </div>`
+    ).join('');
+  }
+
+  // Projects
+  if (data.projects?.length) {
+    document.getElementById('parsed-projects-block').classList.remove('hidden');
+    document.getElementById('parsed-projects').innerHTML = data.projects.slice(0,10).map(p =>
+      `<span class="px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full">${p.slice(0,60)}</span>`
+    ).join('');
+  }
+
+  // Languages
+  if (data.languages?.length) {
+    document.getElementById('parsed-languages-block').classList.remove('hidden');
+    document.getElementById('parsed-languages').innerHTML = data.languages.map(l =>
+      `<span class="px-2 py-0.5 bg-teal-50 text-teal-700 text-xs rounded-full">${l}</span>`
+    ).join('');
+  }
+
+  // Interests
+  if (data.interests?.length) {
+    document.getElementById('parsed-interests-block').classList.remove('hidden');
+    document.getElementById('parsed-interests').innerHTML = data.interests.map(i =>
+      `<span class="px-2 py-0.5 bg-yellow-50 text-yellow-700 text-xs rounded-full">${i}</span>`
+    ).join('');
+  }
+
+  // Awards
+  if (data.awards?.length) {
+    document.getElementById('parsed-awards-block').classList.remove('hidden');
+    document.getElementById('parsed-awards').innerHTML = data.awards.map(a =>
+      `<span class="px-2 py-0.5 bg-red-50 text-red-700 text-xs rounded-full">${a.slice(0,60)}</span>`
+    ).join('');
+  }
+
+  // Auto-populate profile with resume contact info
+  _autofillProfileFromResume(data.contact);
+}
+
+function _autofillProfileFromResume(contact) {
+  if (!contact) return;
+  const prof = loadProfile();
+  if (!prof.name && contact.name) document.getElementById('profile-name').value = contact.name;
+  if (!prof.email && contact.email) document.getElementById('profile-email').value = contact.email;
+  if (!prof.phone && contact.phone) document.getElementById('profile-phone').value = contact.phone;
+  if (!prof.location && contact.location) document.getElementById('profile-location').value = contact.location;
+  if (!prof.linkedin && contact.linkedin) document.getElementById('profile-linkedin').value = 'https://' + contact.linkedin;
 }
 
 // ========== ATS SCORE ==========
@@ -668,20 +970,24 @@ async function optimizeResume() {
   document.getElementById('download-btn').classList.add('hidden');
   state.optimizedText = '';
 
-  await streamRequest('/api/resume/optimize', {
-    resume_data: state.currentResume,
-    target_role: role,
-    job_description: jd,
-  },
-  (chunk) => {
-    state.optimizedText += chunk;
-    outPre.textContent = state.optimizedText;
-    outPre.scrollTop = outPre.scrollHeight;
-  },
-  () => {
-    status.textContent = 'Done!';
-    document.getElementById('download-btn').classList.remove('hidden');
-  });
+  try {
+    await streamRequest('/api/resume/optimize', {
+      resume_data: state.currentResume,
+      target_role: role,
+      job_description: jd,
+    },
+    (chunk) => {
+      state.optimizedText += chunk;
+      outPre.textContent = state.optimizedText;
+      outPre.scrollTop = outPre.scrollHeight;
+    },
+    () => {
+      status.textContent = 'Done ✓';
+      document.getElementById('download-btn').classList.remove('hidden');
+    });
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  }
 }
 
 // ========== COVER LETTER ==========
@@ -698,24 +1004,163 @@ async function generateCoverLetter() {
   clOut.textContent = '';
   let clText = '';
 
-  await streamRequest('/api/resume/cover-letter', {
-    resume_data: state.currentResume,
-    job_title: 'the role',
-    company: 'the company',
-    job_description: jd,
-    target_role: role,
-  },
-  (chunk) => {
-    clText += chunk;
-    clOut.textContent = clText;
-    clOut.scrollTop = clOut.scrollHeight;
-  },
-  () => {});
+  try {
+    await streamRequest('/api/resume/cover-letter', {
+      resume_data: state.currentResume,
+      job_title: 'the role',
+      company: 'the company',
+      job_description: jd,
+      target_role: role,
+    },
+    (chunk) => {
+      clText += chunk;
+      clOut.textContent = clText;
+      clOut.scrollTop = clOut.scrollHeight;
+    },
+    () => {});
+  } catch(e) {
+    clOut.textContent = 'Error generating cover letter: ' + e.message;
+  }
 }
 
 function copyCoverLetter() {
   const text = document.getElementById('cover-letter-output').textContent;
   navigator.clipboard.writeText(text);
+}
+
+// ========== RESUME BOOST ==========
+let boostJobUrl = '';
+let boostOptimizedText = '';
+
+async function resumeBoost() {
+  if (!state.currentResume) { alert('Upload your resume first.'); return; }
+  const jd = document.getElementById('jd-input').value.trim();
+  if (!jd) { alert('Paste a job description to boost your resume against.'); return; }
+  const role = document.querySelector('input[name="target-role"]:checked')?.value || 'cybersecurity';
+
+  document.getElementById('boost-modal').classList.remove('hidden');
+  document.getElementById('boost-loading').classList.remove('hidden');
+  document.getElementById('print-resume-content').classList.add('hidden');
+  document.getElementById('boost-print-btn').classList.add('hidden');
+  document.getElementById('boost-docx-btn').classList.add('hidden');
+  document.getElementById('boost-apply-btn').classList.add('hidden');
+  document.getElementById('boost-score-bar').innerHTML = '';
+  boostOptimizedText = '';
+  boostJobUrl = '';
+
+  // Step 1: Get ATS score (before)
+  let beforeScore = null;
+  try {
+    const scoreResp = await fetch('/api/resume/ats-score', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({resume_text: state.currentResume.raw_text, job_description: jd, use_claude: false}),
+    });
+    if (scoreResp.ok) { const r = await scoreResp.json(); beforeScore = r.score; }
+  } catch(e) {}
+
+  // Step 2: Optimize (streaming)
+  try {
+  await streamRequest('/api/resume/optimize', {resume_data: state.currentResume, target_role: role, job_description: jd},
+    (chunk) => { boostOptimizedText += chunk; },
+    async () => {
+      // Step 3: Get after score
+      let afterScore = null;
+      try {
+        const scoreResp2 = await fetch('/api/resume/ats-score', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({resume_text: boostOptimizedText, job_description: jd, use_claude: false}),
+        });
+        if (scoreResp2.ok) { const r = await scoreResp2.json(); afterScore = r.score; }
+      } catch(e) {}
+
+      document.getElementById('boost-loading').classList.add('hidden');
+      renderBoostPreview(boostOptimizedText, beforeScore, afterScore);
+      document.getElementById('boost-print-btn').classList.remove('hidden');
+      document.getElementById('boost-docx-btn').classList.remove('hidden');
+      document.getElementById('boost-apply-btn').classList.remove('hidden');
+      state.optimizedText = boostOptimizedText;
+    }
+  );
+  } catch(e) {
+    document.getElementById('boost-loading').classList.add('hidden');
+    document.getElementById('boost-score-bar').innerHTML = `<span class="text-red-500 text-sm">Error: ${e.message}</span>`;
+  }
+}
+
+function renderBoostPreview(text, before, after) {
+  // Score bar
+  const bar = document.getElementById('boost-score-bar');
+  if (before !== null || after !== null) {
+    const beforeColor = before >= 70 ? 'text-green-600' : before >= 50 ? 'text-yellow-600' : 'text-red-500';
+    const afterColor = after >= 70 ? 'text-green-600' : after >= 50 ? 'text-yellow-600' : 'text-red-500';
+    bar.innerHTML = `
+      <span class="text-xs text-gray-400">ATS Score:</span>
+      ${before !== null ? `<span class="text-sm font-bold ${beforeColor}">${before}</span><span class="text-gray-300 text-xs">before</span>` : ''}
+      ${before !== null && after !== null ? `<span class="text-gray-400">→</span>` : ''}
+      ${after !== null ? `<span class="text-sm font-bold ${afterColor}">${after}</span><span class="text-gray-300 text-xs">after boost</span>` : ''}
+      ${(before !== null && after !== null && after > before) ? `<span class="text-xs text-green-600 font-medium">+${after - before} pts</span>` : ''}`;
+  }
+
+  // Render markdown-like resume to HTML
+  const lines = text.split('\n');
+  let html = '<div style="font-family: Calibri, sans-serif; font-size: 11pt; line-height: 1.4; max-width: 680px; margin: 0 auto;">';
+  let inBullets = false;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { if (inBullets) { html += '</ul>'; inBullets = false; } continue; }
+    if (t.startsWith('## ')) {
+      if (inBullets) { html += '</ul>'; inBullets = false; }
+      html += `<h2 style="font-size:12pt;font-weight:700;border-bottom:1.5px solid #2563eb;padding-bottom:2px;margin:14px 0 5px;text-transform:uppercase;letter-spacing:0.05em;color:#1e3a5f;">${t.slice(3)}</h2>`;
+    } else if (t.startsWith('### ')) {
+      if (inBullets) { html += '</ul>'; inBullets = false; }
+      html += `<h3 style="font-size:10.5pt;font-weight:600;margin:8px 0 2px;">${t.slice(4)}</h3>`;
+    } else if (t.startsWith('- ') || t.startsWith('• ')) {
+      if (!inBullets) { html += '<ul style="margin:2px 0 6px 18px;padding:0;">'; inBullets = true; }
+      html += `<li style="font-size:10pt;margin:1px 0;">${t.slice(2)}</li>`;
+    } else {
+      if (inBullets) { html += '</ul>'; inBullets = false; }
+      html += `<p style="font-size:10.5pt;margin:3px 0;">${t}</p>`;
+    }
+  }
+  if (inBullets) html += '</ul>';
+  html += '</div>';
+
+  const preview = document.getElementById('print-resume-content');
+  preview.innerHTML = html;
+  preview.classList.remove('hidden');
+}
+
+function printResume() {
+  document.getElementById('print-resume-content').style.display = 'block';
+  window.print();
+  setTimeout(() => { document.getElementById('print-resume-content').style.display = 'none'; }, 1000);
+}
+
+async function downloadBoostDocx() {
+  if (!boostOptimizedText) return;
+  const resp = await fetch('/api/resume/export', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({optimized_text: boostOptimizedText, contact: state.currentResume?.contact || {}}),
+  });
+  if (!resp.ok) { alert('Export failed'); return; }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'resume_boosted.docx'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function applyWithBoostedResume() {
+  const jd = document.getElementById('jd-input').value.trim();
+  if (boostJobUrl) { window.open(boostJobUrl, '_blank'); return; }
+  // Try to extract URL from JD
+  const urlMatch = jd.match(/https?:\/\/[^\s]+/);
+  if (urlMatch) { window.open(urlMatch[0], '_blank'); return; }
+  alert('No job URL found. Please apply manually using the downloaded resume.');
+}
+
+function closeBoostModal() {
+  document.getElementById('boost-modal').classList.add('hidden');
 }
 
 // ========== DOCX DOWNLOAD ==========
@@ -769,8 +1214,17 @@ async function searchJobs() {
 function renderJobResults(jobs, total) {
   const container = document.getElementById('jobs-results');
   if (!jobs.length) {
-    document.getElementById('jobs-empty').classList.remove('hidden');
-    document.getElementById('jobs-empty').textContent = 'No jobs found. Try different search terms or check Adzuna API credentials.';
+    const empty = document.getElementById('jobs-empty');
+    empty.classList.remove('hidden');
+    const role = document.getElementById('job-role').value;
+    const loc = document.getElementById('job-location').value;
+    const query = encodeURIComponent(ROLE_SEARCH_TERMS_FRONTEND[role]?.[0] || role.replace('_', ' '));
+    document.getElementById('job-board-links').innerHTML = `
+      <a href="https://www.linkedin.com/jobs/search/?keywords=${query}&location=${encodeURIComponent(loc)}" target="_blank" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">LinkedIn Jobs</a>
+      <a href="https://www.indeed.com/jobs?q=${query}&l=${encodeURIComponent(loc)}" target="_blank" class="px-4 py-2 bg-blue-400 text-white text-sm rounded-lg hover:bg-blue-500">Indeed</a>
+      <a href="https://www.google.com/search?q=${query}+jobs+${encodeURIComponent(loc)}" target="_blank" class="px-4 py-2 bg-gray-700 text-white text-sm rounded-lg hover:bg-gray-800">Google Jobs</a>
+      <a href="https://remotive.com/remote-jobs" target="_blank" class="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">Remotive</a>
+      <a href="https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${query}" target="_blank" class="px-4 py-2 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700">Glassdoor</a>`;
     return;
   }
 
@@ -801,10 +1255,9 @@ function renderJobResults(jobs, total) {
           ${job.description ? `<p class="text-xs text-gray-400 mt-2 line-clamp-2">${job.description.slice(0, 120)}...</p>` : ''}
         </div>
         <div class="flex flex-col gap-1 flex-shrink-0">
-          <a href="${job.url}" target="_blank" rel="noopener"
-            class="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700 text-center">Apply</a>
-          <button onclick='openApplyModal(${JSON.stringify(job).replace(/'/g, "\\'")})'
-            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-50">Package</button>
+          <a href="${job.url}" target="_blank" rel="noopener" class="px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700 text-center">Apply</a>
+          <button onclick='openQuickApply(${JSON.stringify(job).replace(/'/g, "\\'")})' class="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700">Quick Apply</button>
+          <button onclick='openApplyModal(${JSON.stringify(job).replace(/'/g, "\\'")})' class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-50">Cover Letter</button>
         </div>
       </div>`;
     container.appendChild(card);
@@ -1035,23 +1488,30 @@ async function streamRequest(url, body, onChunk, onDone) {
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || 'Request failed');
+    throw new Error(err.detail || `Server error ${resp.status}`);
   }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
+  let buffer = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const text = decoder.decode(value, { stream: true });
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6);
-        if (data === '[DONE]') { onDone(); return; }
-        if (!data.startsWith('[ERROR]')) onChunk(data);
-      }
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are delimited by blank lines (\n\n)
+    const events = buffer.split('\n\n');
+    buffer = events.pop() ?? '';
+
+    for (const event of events) {
+      const dataLines = event.split('\n').filter(l => l.startsWith('data: '));
+      if (!dataLines.length) continue;
+      // Join multi-line data fields (SSE spec: consecutive data: lines join with \n)
+      const data = dataLines.map(l => l.slice(6)).join('\n');
+      if (data.trim() === '[DONE]') { onDone(); return; }
+      if (data.startsWith('[ERROR]')) throw new Error(data.slice(8));
+      onChunk(data);
     }
   }
   onDone();
@@ -1165,6 +1625,121 @@ function formatSalary(salaryMin, salaryMax) {
   return min + max;
 }
 
+// ========== PROFILE MANAGEMENT ==========
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem('careerlift_profile') || '{}'); } catch(e) { return {}; }
+}
+
+function saveProfile() {
+  const profile = {
+    name: document.getElementById('profile-name').value.trim(),
+    email: document.getElementById('profile-email').value.trim(),
+    phone: document.getElementById('profile-phone').value.trim(),
+    location: document.getElementById('profile-location').value.trim(),
+    linkedin: document.getElementById('profile-linkedin').value.trim(),
+    website: document.getElementById('profile-website').value.trim(),
+    work_auth: document.getElementById('profile-work-auth').value,
+    experience_years: document.getElementById('profile-experience').value,
+    salary: document.getElementById('profile-salary').value.trim(),
+    start: document.getElementById('profile-start').value,
+    summary: document.getElementById('profile-summary').value.trim(),
+  };
+  localStorage.setItem('careerlift_profile', JSON.stringify(profile));
+  closeProfileModal();
+  document.getElementById('profile-setup-bar').classList.add('hidden');
+  alert('Profile saved!');
+}
+
+function openProfileModal() {
+  const prof = loadProfile();
+  document.getElementById('profile-name').value = prof.name || state.currentResume?.contact?.name || '';
+  document.getElementById('profile-email').value = prof.email || state.currentResume?.contact?.email || '';
+  document.getElementById('profile-phone').value = prof.phone || state.currentResume?.contact?.phone || '';
+  document.getElementById('profile-location').value = prof.location || state.currentResume?.contact?.location || '';
+  document.getElementById('profile-linkedin').value = prof.linkedin || (state.currentResume?.contact?.linkedin ? 'https://' + state.currentResume.contact.linkedin : '') || '';
+  document.getElementById('profile-website').value = prof.website || '';
+  if (prof.work_auth) document.getElementById('profile-work-auth').value = prof.work_auth;
+  document.getElementById('profile-experience').value = prof.experience_years || '';
+  document.getElementById('profile-salary').value = prof.salary || '';
+  if (prof.start) document.getElementById('profile-start').value = prof.start;
+  document.getElementById('profile-summary').value = prof.summary || state.currentResume?.summary || '';
+  document.getElementById('profile-modal').classList.remove('hidden');
+}
+
+function closeProfileModal() {
+  document.getElementById('profile-modal').classList.add('hidden');
+}
+
+// ========== QUICK APPLY ==========
+let _qaJob = null;
+
+function openQuickApply(job) {
+  _qaJob = job;
+  const prof = loadProfile();
+  const resume = state.currentResume || {};
+  const contact = resume.contact || {};
+
+  document.getElementById('qa-job-title').textContent = job.title;
+  document.getElementById('qa-job-company').textContent = job.company + (job.location ? ' · ' + job.location : '');
+  document.getElementById('qa-name').textContent = prof.name || contact.name || '—';
+  document.getElementById('qa-email').textContent = prof.email || contact.email || '—';
+  document.getElementById('qa-phone').textContent = prof.phone || contact.phone || '—';
+  document.getElementById('qa-location').textContent = prof.location || contact.location || '—';
+  document.getElementById('qa-linkedin').textContent = prof.linkedin || contact.linkedin || '—';
+  document.getElementById('qa-work-auth').textContent = prof.work_auth || '—';
+
+  // Set up job board search links
+  const query = encodeURIComponent(job.title + ' ' + job.company);
+  document.getElementById('qa-linkedin-search').href = `https://www.linkedin.com/jobs/search/?keywords=${query}`;
+  document.getElementById('qa-indeed-search').href = `https://www.indeed.com/jobs?q=${query}`;
+  document.getElementById('qa-google-search').href = `https://www.google.com/search?q=${query}+jobs`;
+
+  document.getElementById('qa-cl-output').classList.add('hidden');
+  document.getElementById('qa-cl-loading').classList.remove('hidden');
+  document.getElementById('qa-cl-output').textContent = '';
+  document.getElementById('quick-apply-modal').classList.remove('hidden');
+
+  // Stream cover letter
+  const role = document.getElementById('job-role').value;
+  let clText = '';
+  streamRequest('/api/resume/cover-letter', {
+    resume_data: state.currentResume || {},
+    job_title: job.title, company: job.company,
+    job_description: job.description || job.title + ' at ' + job.company,
+    target_role: role,
+  },
+  (chunk) => { clText += chunk; document.getElementById('qa-cl-output').textContent = clText; },
+  () => { document.getElementById('qa-cl-loading').classList.add('hidden'); document.getElementById('qa-cl-output').classList.remove('hidden'); }
+  ).catch(() => { document.getElementById('qa-cl-loading').textContent = 'Cover letter unavailable (upload resume first)'; });
+}
+
+function closeQuickApply() {
+  document.getElementById('quick-apply-modal').classList.add('hidden');
+}
+
+function openJobApplication() {
+  if (_qaJob?.url) window.open(_qaJob.url, '_blank');
+}
+
+function copyQuickApplyPackage() {
+  const prof = loadProfile();
+  const contact = state.currentResume?.contact || {};
+  const cl = document.getElementById('qa-cl-output').textContent;
+  const pkg = `=== APPLICATION DETAILS ===
+Name: ${prof.name || contact.name || ''}
+Email: ${prof.email || contact.email || ''}
+Phone: ${prof.phone || contact.phone || ''}
+Location: ${prof.location || contact.location || ''}
+LinkedIn: ${prof.linkedin || contact.linkedin || ''}
+Work Authorization: ${prof.work_auth || ''}
+Desired Salary: ${prof.salary || ''}
+Available: ${prof.start || ''}
+
+=== COVER LETTER ===
+${cl}`;
+  navigator.clipboard.writeText(pkg).then(() => alert('Application package copied to clipboard!'));
+}
+
 // ========== HELPERS ==========
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -1174,6 +1749,10 @@ function fmtDate(iso) {
 // Init
 showTab('resume');
 detectCurrency();
+// Show profile setup bar if profile not set
+if (!loadProfile().name) {
+  document.getElementById('profile-setup-bar').classList.remove('hidden');
+}
 </script>
 </body>
 </html>
