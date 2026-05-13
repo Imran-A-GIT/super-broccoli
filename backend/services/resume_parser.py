@@ -106,8 +106,9 @@ _MONTH = (
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 )
 _YEAR = r"\d{4}"
+_ABBR_YEAR = r"'\d{2}"  # abbreviated year with apostrophe: '21, '19, etc.
 _PRESENT = r"(?:Present|Current|Now|Today|Ongoing|To\s+Date)"
-_DATE_TOKEN = rf"(?:{_MONTH}\s*[,.]?\s*{_YEAR}|{_YEAR}|\d{{1,2}}[/\-]{_YEAR})"
+_DATE_TOKEN = rf"(?:{_MONTH}\s*[,.]?\s*(?:{_YEAR}|{_ABBR_YEAR})|{_YEAR}|\d{{1,2}}[/\-]{_YEAR})"
 
 _DATE_RANGE_RE = re.compile(
     rf"(?P<start>{_DATE_TOKEN})\s*[-–—to/]+\s*(?P<end>{_DATE_TOKEN}|{_PRESENT})",
@@ -129,6 +130,15 @@ _CERT_RE = re.compile(
     r"Security\+|Network\+|A\+|CySA\+|CCNA|CCNP|CCIE|MCSA|MCSE|MCTS|MCITP|"
     r"SHRM|CPA|CFA|CIPP|OSCP|GIAC|GPEN|GSEC|Six\s+Sigma|Lean|PCI(?:-DSS)?|"
     r"TOGAF|COBIT|ISO\s+27001|SOC\s*2|HIPAA|FINRA|Series\s+\d+)\b",
+    re.IGNORECASE,
+)
+
+_JOB_TITLE_RE = re.compile(
+    r"\b(Analyst|Developer|Manager|Designer|Director|Coordinator|Specialist|"
+    r"Consultant|Advisor|Administrator|Architect|Lead|Senior|Junior|Executive|"
+    r"Officer|Supervisor|Technician|Programmer|Scientist|Representative|"
+    r"Inspector|Auditor|Researcher|Strategist|President|Intern|co-op|"
+    r"Assistant|Processor|Contractor)\b",
     re.IGNORECASE,
 )
 
@@ -441,11 +451,25 @@ def _parse_job_blocks(lines: list[str]) -> list[WorkExperience]:
             header_lines.append(stripped)
 
         # Also capture any title/company info embedded on the date line itself
-        remainder = _DATE_RANGE_RE.sub("", lines[date_line_i]).strip().strip("|-–—").strip()
+        remainder_raw = _DATE_RANGE_RE.sub("", lines[date_line_i]).strip()
+        # Strip dashes but preserve leading | (needed to detect continuation/promotion entries)
+        remainder = remainder_raw.lstrip("–—").strip()
         if remainder:
             header_lines.append(remainder)
 
+        # Detect "continuation" entries: multiple roles at the same company (promotions).
+        # Indicated by the date line or remainder starting with a pipe character.
+        is_continuation = (
+            lines[date_line_i].strip().startswith("|")
+            or remainder_raw.startswith("|")
+            or (header_lines and header_lines[0].lstrip().startswith("|"))
+        )
+
         title, company = _parse_title_company(header_lines)
+
+        # For promotion/continuation entries inherit the company from the previous role
+        if is_continuation and (not company or company == "Company") and jobs:
+            company = jobs[-1].company
 
         # ── Collect bullet points ─────────────────────────────────────────
         next_date_line = (
@@ -534,10 +558,26 @@ def _parse_title_company(header_lines: list[str]) -> tuple[str, str]:
         if " @ " in line:
             parts = line.split(" @ ", 1)
             return parts[0].strip(), parts[1].strip()
-        # "Title | Company" — only if not a date range
-        if " | " in line and not _DATE_RANGE_RE.search(line):
-            parts = line.split(" | ", 1)
-            return parts[0].strip(), parts[1].strip()
+        # "Company | Title" or "Title | Company" — detect by pipe presence
+        if "|" in line and not _DATE_RANGE_RE.search(line):
+            # Leading pipe means continuation entry (same company, different role)
+            if line.lstrip().startswith("|"):
+                return line.lstrip().lstrip("|").strip(), ""
+            parts = re.split(r"\s*\|\s*", line, maxsplit=1)
+            left, right = parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
+            if not right:
+                return left, ""
+            # If right side is ALL CAPS → it's the job title; left is the company
+            right_alpha = re.sub(r"[^A-Za-z]", "", right)
+            if right_alpha and right_alpha.isupper():
+                return right, left  # (title, company)
+            # If right has job title keywords and left doesn't → Company | Title format
+            if _JOB_TITLE_RE.search(right) and not _JOB_TITLE_RE.search(left):
+                return right, left  # (title, company)
+            # If left has a corporate suffix → left is the company
+            if _CORP_SUFFIX_RE.search(left):
+                return right, left  # (title, company)
+            return left, right  # default: left=title, right=company
         # "Title — Company" or "Title – Company"
         for sep in (" — ", " – ", " - "):
             if sep in line and not _DATE_RANGE_RE.search(line):
@@ -577,7 +617,14 @@ def _sort_by_recency(jobs: list[WorkExperience]) -> list[WorkExperience]:
         if re.search(r"present|current|now|today|ongoing", s, re.IGNORECASE):
             return 9999
         m = re.search(r"\b(19|20)\d{2}\b", s)
-        return int(m.group()) if m else 0
+        if m:
+            return int(m.group())
+        # Handle abbreviated years: '21 → 2021, '95 → 1995
+        m = re.search(r"'(\d{2})\b", s)
+        if m:
+            yy = int(m.group(1))
+            return 2000 + yy if yy <= 50 else 1900 + yy
+        return 0
 
     return sorted(jobs, key=lambda j: (-_year(j.end_date), -_year(j.start_date)))
 

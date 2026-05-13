@@ -970,20 +970,24 @@ async function optimizeResume() {
   document.getElementById('download-btn').classList.add('hidden');
   state.optimizedText = '';
 
-  await streamRequest('/api/resume/optimize', {
-    resume_data: state.currentResume,
-    target_role: role,
-    job_description: jd,
-  },
-  (chunk) => {
-    state.optimizedText += chunk;
-    outPre.textContent = state.optimizedText;
-    outPre.scrollTop = outPre.scrollHeight;
-  },
-  () => {
-    status.textContent = 'Done!';
-    document.getElementById('download-btn').classList.remove('hidden');
-  });
+  try {
+    await streamRequest('/api/resume/optimize', {
+      resume_data: state.currentResume,
+      target_role: role,
+      job_description: jd,
+    },
+    (chunk) => {
+      state.optimizedText += chunk;
+      outPre.textContent = state.optimizedText;
+      outPre.scrollTop = outPre.scrollHeight;
+    },
+    () => {
+      status.textContent = 'Done ✓';
+      document.getElementById('download-btn').classList.remove('hidden');
+    });
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  }
 }
 
 // ========== COVER LETTER ==========
@@ -1000,19 +1004,23 @@ async function generateCoverLetter() {
   clOut.textContent = '';
   let clText = '';
 
-  await streamRequest('/api/resume/cover-letter', {
-    resume_data: state.currentResume,
-    job_title: 'the role',
-    company: 'the company',
-    job_description: jd,
-    target_role: role,
-  },
-  (chunk) => {
-    clText += chunk;
-    clOut.textContent = clText;
-    clOut.scrollTop = clOut.scrollHeight;
-  },
-  () => {});
+  try {
+    await streamRequest('/api/resume/cover-letter', {
+      resume_data: state.currentResume,
+      job_title: 'the role',
+      company: 'the company',
+      job_description: jd,
+      target_role: role,
+    },
+    (chunk) => {
+      clText += chunk;
+      clOut.textContent = clText;
+      clOut.scrollTop = clOut.scrollHeight;
+    },
+    () => {});
+  } catch(e) {
+    clOut.textContent = 'Error generating cover letter: ' + e.message;
+  }
 }
 
 function copyCoverLetter() {
@@ -1051,6 +1059,7 @@ async function resumeBoost() {
   } catch(e) {}
 
   // Step 2: Optimize (streaming)
+  try {
   await streamRequest('/api/resume/optimize', {resume_data: state.currentResume, target_role: role, job_description: jd},
     (chunk) => { boostOptimizedText += chunk; },
     async () => {
@@ -1072,6 +1081,10 @@ async function resumeBoost() {
       state.optimizedText = boostOptimizedText;
     }
   );
+  } catch(e) {
+    document.getElementById('boost-loading').classList.add('hidden');
+    document.getElementById('boost-score-bar').innerHTML = `<span class="text-red-500 text-sm">Error: ${e.message}</span>`;
+  }
 }
 
 function renderBoostPreview(text, before, after) {
@@ -1475,23 +1488,30 @@ async function streamRequest(url, body, onChunk, onDone) {
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || 'Request failed');
+    throw new Error(err.detail || `Server error ${resp.status}`);
   }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
+  let buffer = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const text = decoder.decode(value, { stream: true });
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6);
-        if (data === '[DONE]') { onDone(); return; }
-        if (!data.startsWith('[ERROR]')) onChunk(data);
-      }
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are delimited by blank lines (\n\n)
+    const events = buffer.split('\n\n');
+    buffer = events.pop() ?? '';
+
+    for (const event of events) {
+      const dataLines = event.split('\n').filter(l => l.startsWith('data: '));
+      if (!dataLines.length) continue;
+      // Join multi-line data fields (SSE spec: consecutive data: lines join with \n)
+      const data = dataLines.map(l => l.slice(6)).join('\n');
+      if (data.trim() === '[DONE]') { onDone(); return; }
+      if (data.startsWith('[ERROR]')) throw new Error(data.slice(8));
+      onChunk(data);
     }
   }
   onDone();
