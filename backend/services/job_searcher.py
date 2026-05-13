@@ -121,11 +121,18 @@ async def search_adzuna(
         logger.warning("Adzuna search failed: %s", exc)
         return []
 
+    # Filter by title relevance: require at least one keyword word to appear in title
+    kw_parts = keywords.lower().split()
+
     jobs: list[JobListing] = []
     for item in data.get("results", []):
+        title = item.get("title", "")
+        title_lower = title.lower()
+        if not any(kw in title_lower for kw in kw_parts):
+            continue
         jobs.append(
             JobListing(
-                title=item.get("title", ""),
+                title=title,
                 company=item.get("company", {}).get("display_name", "Unknown"),
                 location=item.get("location", {}).get("display_name"),
                 salary_min=item.get("salary_min"),

@@ -314,7 +314,7 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
     phone = (m.group() if (m := _PHONE_RE.search(full_text)) else None)
     linkedin = (m.group() if (m := _LINKEDIN_RE.search(full_text)) else None)
 
-    # Name detection — two passes:
+    # Name detection — three passes:
     # Pass 1: "Name | email | phone" combined header — name is ALWAYS the first token
     name: Optional[str] = None
     for line in lines[:3]:
@@ -333,7 +333,7 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
                 name = first_token
                 break
 
-    # Pass 2 (fallback): first short standalone non-contact, non-header line
+    # Pass 2 (fallback): first short standalone non-contact, non-header line in first 12 lines
     if not name:
         for line in lines[:12]:
             stripped = line.strip()
@@ -345,11 +345,43 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
                 and not _SECTION_RE.match(stripped)
                 and not stripped.startswith("+")
                 and not re.match(r"^\d", stripped)
-                and 2 < len(stripped) < 60
+                and "|" not in stripped
+                and not _DATE_RANGE_RE.search(stripped)
+                and 2 < len(stripped) < 50
                 and not (stripped.isupper() and (len(stripped.split()) > 2 or _CORP_SUFFIX_RE.search(stripped)))
             ):
                 name = stripped
                 break
+
+    # Pass 3 (extended fallback): scan all lines for a name-like pattern.
+    # Handles two-column PDFs where the name appears far into the extracted text
+    # (e.g. left-column name gets read after right-column work experience).
+    if not name:
+        _PREPOSITIONS = frozenset({"of", "and", "or", "at", "in", "the", "for", "by", "to", "a", "an"})
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if (_EMAIL_RE.search(stripped) or _PHONE_RE.search(stripped)
+                    or _URL_RE.search(stripped) or stripped.startswith("+")
+                    or re.match(r"^\d", stripped) or "|" in stripped
+                    or _BULLET_RE.match(stripped) or _DATE_RANGE_RE.search(stripped)
+                    or _SECTION_RE.match(stripped.rstrip(":"))
+                    or _CORP_SUFFIX_RE.search(stripped)
+                    or len(stripped) > 45):
+                continue
+            # Split and strip trailing credentials (short all-caps like CSM, PMP, MBA)
+            raw_tokens = re.split(r"[\s,]+", stripped)
+            name_tokens = [
+                t for t in raw_tokens
+                if t and not (len(re.sub(r"[®©™]", "", t)) <= 4 and re.sub(r"[®©™]", "", t).isupper())
+            ]
+            if 1 < len(name_tokens) <= 4:
+                lower_toks = [t.lower().strip(".,®©™") for t in name_tokens]
+                if not any(t in _PREPOSITIONS for t in lower_toks):
+                    if all(re.match(r"^[A-Za-z\'\-]+$", t) for t in name_tokens):
+                        name = " ".join(t.title() if t.isupper() else t for t in name_tokens)
+                        break
 
     # Location: City, ST or City, Country
     location: Optional[str] = None
@@ -402,6 +434,17 @@ def _extract_jobs(sections: dict[str, list[str]], section_type: str) -> list[Wor
     for key in sections:
         if key == section_type:
             lines.extend(sections[key])
+
+    # Two-column PDF fix: in multi-column layouts (common for resumes), pdfplumber
+    # reads columns in a mixed order so job entries may appear in the "HEADER" section
+    # (before any section header is encountered) rather than in EXPERIENCE.
+    # Detect this by checking if the HEADER section contains date-range lines.
+    if section_type == "EXPERIENCE":
+        header_lines = sections.get("HEADER", [])
+        if any(_DATE_RANGE_RE.search(l) for l in header_lines):
+            # Prepend HEADER lines so date anchoring works across both column outputs
+            lines = header_lines + lines
+
     if not lines:
         return []
     return _parse_job_blocks(lines)
@@ -584,11 +627,12 @@ def _parse_title_company(header_lines: list[str]) -> tuple[str, str]:
                 parts = line.split(sep, 1)
                 if parts[0].strip() and parts[1].strip():
                     return parts[0].strip(), parts[1].strip()
-        # "Title, Company" (comma separator — only if company-like 2nd part)
+        # "Title, Company" (comma separator — require substantial second part to avoid
+        # splitting "Name, Credential" like "Imran Ahmed, CSM®" as title/company)
         if "," in line and not _DATE_RANGE_RE.search(line):
             parts = line.split(",", 1)
             second = parts[1].strip()
-            if second and len(second) > 3 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp)\b", second, re.I):
+            if second and len(second) > 10 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp)\b", second, re.I):
                 return parts[0].strip(), second
 
     if len(header_lines) >= 2:
