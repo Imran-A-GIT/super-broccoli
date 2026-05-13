@@ -151,24 +151,51 @@ _NUMBERED_BULLET_RE = re.compile(r"^\d+[.)]\s+(.+)")
 
 # ─────────────────────────── PDF EXTRACTION ─────────────────────────────────
 
+def _extract_page_text(page) -> str:
+    """Extract text from one PDF page, handling two-column sidebar layouts.
+
+    For resumes with a left sidebar (~30-35% width), pdfplumber's default
+    extraction interleaves sidebar items (interests, skills) with main-column
+    bullets by y-position.  We crop at 35% width: if both columns have
+    substantial content we emit the right (main) column first so section
+    headers are encountered in the correct reading order.
+    """
+    try:
+        w = float(page.width)
+        h = float(page.height)
+        split_x = w * 0.35
+        left = page.crop((0, 0, split_x, h))
+        right = page.crop((split_x, 0, w, h))
+        left_text = (left.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
+        right_text = (right.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
+        # Only use column split when both columns have real content
+        if len(left_text) > 80 and len(right_text) > 100:
+            return right_text + "\n\n" + left_text
+    except Exception:
+        pass
+
+    # Standard single-column extraction
+    text = page.extract_text(x_tolerance=3, y_tolerance=3)
+    if text and len(text.strip()) > 30:
+        return text
+
+    # Fallback: word-object reconstruction for complex layouts
+    words = page.extract_words(
+        x_tolerance=5, y_tolerance=5,
+        keep_blank_chars=False,
+        use_text_flow=True,
+    )
+    return _words_to_lines(words) if words else ""
+
+
 async def parse_pdf(file_bytes: bytes) -> ResumeData:
     """Extract text from PDF and parse into structured resume data."""
     texts: list[str] = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
-            # Primary: standard extraction (handles most PDFs including text boxes)
-            text = page.extract_text(x_tolerance=3, y_tolerance=3)
-            if text and len(text.strip()) > 30:
-                texts.append(text)
-            else:
-                # Fallback: word-object reconstruction (better for complex layouts)
-                words = page.extract_words(
-                    x_tolerance=5, y_tolerance=5,
-                    keep_blank_chars=False,
-                    use_text_flow=True,
-                )
-                if words:
-                    texts.append(_words_to_lines(words))
+            page_text = _extract_page_text(page)
+            if page_text:
+                texts.append(page_text)
 
     full_text = "\n\n".join(texts)
     if not full_text.strip():
@@ -435,19 +462,35 @@ def _extract_jobs(sections: dict[str, list[str]], section_type: str) -> list[Wor
         if key == section_type:
             lines.extend(sections[key])
 
-    # Two-column PDF fix: in multi-column layouts (common for resumes), pdfplumber
-    # reads columns in a mixed order so job entries may appear in the "HEADER" section
-    # (before any section header is encountered) rather than in EXPERIENCE.
-    # Detect this by checking if the HEADER section contains date-range lines.
     if section_type == "EXPERIENCE":
+        # Two-column PDF fix: job entries that appear before the first section
+        # header land in HEADER.  Include them if they contain date ranges.
         header_lines = sections.get("HEADER", [])
         if any(_DATE_RANGE_RE.search(l) for l in header_lines):
-            # Prepend HEADER lines so date anchoring works across both column outputs
             lines = header_lines + lines
+
+        # Safety net: if co-op / older roles landed in INTERESTS or PROJECTS
+        # (due to page-boundary section attribution), absorb them too.
+        for extra_key in ("INTERESTS", "PROJECTS", "AWARDS"):
+            extra = sections.get(extra_key, [])
+            if any(_DATE_RANGE_RE.search(l) for l in extra):
+                lines = lines + extra
 
     if not lines:
         return []
-    return _parse_job_blocks(lines)
+
+    jobs = _parse_job_blocks(lines)
+
+    # Deduplicate by (title[:30], company[:20], start_date) — guards against
+    # the same entry being picked up from both HEADER and EXPERIENCE.
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[WorkExperience] = []
+    for j in jobs:
+        key = (j.title.lower()[:30], j.company.lower()[:20], (j.start_date or "").lower())
+        if key not in seen:
+            seen.add(key)
+            unique.append(j)
+    return unique
 
 
 def _parse_job_blocks(lines: list[str]) -> list[WorkExperience]:
