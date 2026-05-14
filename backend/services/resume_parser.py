@@ -311,8 +311,17 @@ async def parse_text(raw_text: str) -> ResumeData:
 # ─────────────────────────── MAIN PARSER ────────────────────────────────────
 
 def _parse_text(text: str) -> ResumeData:
-    # Normalize: CRLF → LF, strip trailing whitespace per line
+    # Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Normalize Unicode punctuation: smart quotes/apostrophes → straight ASCII.
+    # PDFs often embed curly apostrophes (U+2018/2019) which break date regex like "Aug '21".
+    text = (
+        text
+        .replace("‘", "'").replace("’", "'")  # left/right single quotes
+        .replace("“", '"').replace("”", '"')  # left/right double quotes
+        .replace("ʼ", "'").replace("′", "'")  # modifier apostrophe, prime
+        .replace("–", "–").replace("—", "—")  # en-dash, em-dash (keep as-is but ensure)
+    )
     lines = [ln.rstrip() for ln in text.splitlines()]
 
     contact = _extract_contact(lines, text)
@@ -434,8 +443,13 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     current = "HEADER"
     for line in lines:
         stripped = line.strip().rstrip(":")
-        if _SECTION_RE.match(stripped + " ") or _SECTION_RE.match(stripped):
-            key = _canonical_section(stripped)
+        # Strip continuation markers so "WORK EXPERIENCE (cont.)" → "WORK EXPERIENCE"
+        normalized = re.sub(
+            r"\s*\(cont(?:inued)?\.?\)\s*$|\s*\(page\s*\d+\)\s*$|\s*-\s*cont(?:inued)?\.?\s*$",
+            "", stripped, flags=re.IGNORECASE,
+        ).strip()
+        if _SECTION_RE.match(normalized + " ") or _SECTION_RE.match(normalized):
+            key = _canonical_section(normalized)
             current = key
             sections.setdefault(current, [])
         else:
