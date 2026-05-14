@@ -106,9 +106,12 @@ _MONTH = (
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 )
 _YEAR = r"\d{4}"
-_ABBR_YEAR = r"'\d{2}"  # abbreviated year with apostrophe: '21, '19, etc.
+_ABBR_YEAR = r"'\d{2}"  # abbreviated year with apostrophe: '21, '19 (straight or smart)
 _PRESENT = r"(?:Present|Current|Now|Today|Ongoing|To\s+Date)"
-_DATE_TOKEN = rf"(?:{_MONTH}\s*[,.]?\s*(?:{_YEAR}|{_ABBR_YEAR})|{_YEAR}|\d{{1,2}}[/\-]{_YEAR})"
+
+# Date token covers: "Aug 2021", "Aug '21", "August, 2021", "2021",
+# "08/2021", "2021-08", "Q1 2022" (quarterly), standalone 4-digit year
+_DATE_TOKEN = rf"(?:{_MONTH}\s*[,.]?\s*(?:{_YEAR}|{_ABBR_YEAR})|Q[1-4]\s*{_YEAR}|{_YEAR}|\d{{1,2}}[/\-]{_YEAR})"
 
 _DATE_RANGE_RE = re.compile(
     rf"(?P<start>{_DATE_TOKEN})\s*[-–—to/]+\s*(?P<end>{_DATE_TOKEN}|{_PRESENT})",
@@ -143,20 +146,24 @@ _JOB_TITLE_RE = re.compile(
 )
 
 _BULLET_RE = re.compile(
-    r"^[•‣․▪●➢✓►▸❖"
-    r"▪▸◆►○●•\-\*]\s+(.+)"
+    # Common bullet/symbol characters used across resume templates
+    r"^[•‣·▪●➢✓►▸❖▪▸◆►○●•·→⟩›»⦿⁃∙◉◎✦✧✗✘✔✕✖"
+    r"\-\*]\s+(.+)"
 )
 _NUMBERED_BULLET_RE = re.compile(r"^\d+[.)]\s+(.+)")
+# Lines that are purely decorative dividers (─, ═, ─, ━, =, _, -)
+_DIVIDER_RE = re.compile(r"^[\-─═━_=\s]{4,}$")
 
 
 # ─────────────────────────── PDF EXTRACTION ─────────────────────────────────
 
 def _find_column_split(words: list[dict], page_width: float) -> Optional[float]:
-    """Find the x-coordinate of the gap between a left sidebar and right main column.
+    """Find the x-coordinate gap between a left sidebar and right main column.
 
-    Looks for the largest empty stretch of x-space (no word starts) in the
-    10%-48% region of page width.  Returns the midpoint of that gap, or None
-    if no significant gap is found (single-column page).
+    Only fires when there is a clear whitespace channel between two distinct
+    text columns (gap >= 5% of page width and left column width <= 42% of page).
+    This conservative threshold avoids false-positives on single-column resumes
+    that have indented bullets or centred headers.
     """
     lo = page_width * 0.10
     hi = page_width * 0.48
@@ -167,7 +174,7 @@ def _find_column_split(words: list[dict], page_width: float) -> Optional[float]:
         for w in words
         if lo <= float(w.get("x0", 0)) <= hi
     })
-    if len(xs) < 2:
+    if len(xs) < 4:  # need enough diversity to distinguish two populations
         return None
 
     max_gap = 0
@@ -178,8 +185,26 @@ def _find_column_split(words: list[dict], page_width: float) -> Optional[float]:
             max_gap = gap
             split_x = (xs[i] + xs[i - 1]) / 2.0
 
-    # Require at least 2.5% of page width as a gap to count as a real column boundary
-    return split_x if (split_x is not None and max_gap > page_width * 0.025) else None
+    # Gap must be >= 5% of page width (≈ 30pt on US letter) to be a real column gap.
+    # Single-column indentation typically creates gaps of 10-20pt which are filtered out.
+    if split_x is None or max_gap < page_width * 0.05:
+        return None
+
+    # Sanity: left "column" must not extend past 45% of page width
+    left_max_x1 = max(
+        (float(w.get("x1", w.get("x0", 0))) for w in words if float(w.get("x0", 0)) < split_x),
+        default=0,
+    )
+    if left_max_x1 > page_width * 0.45:
+        return None
+
+    # Both columns need enough words to be real content blocks
+    left_count = sum(1 for w in words if float(w.get("x0", 0)) < split_x)
+    right_count = sum(1 for w in words if float(w.get("x0", 0)) >= split_x)
+    if left_count < 8 or right_count < 20:
+        return None
+
+    return split_x
 
 
 def _extract_page_text(page) -> str:
@@ -201,7 +226,21 @@ def _extract_page_text(page) -> str:
                 left_text = _words_to_lines(left_words).strip()
                 right_text = _words_to_lines(right_words).strip()
                 if len(left_text) > 80 and len(right_text) > 100:
-                    return right_text + "\n\n" + left_text
+                    # Determine which column is the sidebar (shorter, contains
+                    # sidebar-typical sections: INTERESTS/SKILLS/LANGUAGES).
+                    # Emit the main-content column first so EXPERIENCE headers
+                    # appear before sidebar section headers.
+                    _SIDEBAR_SECTIONS = re.compile(
+                        r"\b(INTERESTS?|HOBBIES?|SKILLS?|LANGUAGES?|CONTACT|SOCIAL)\b",
+                        re.IGNORECASE,
+                    )
+                    left_is_sidebar = bool(_SIDEBAR_SECTIONS.search(left_text)) or (
+                        len(left_text) < len(right_text) * 0.6
+                    )
+                    if left_is_sidebar:
+                        return right_text + "\n\n" + left_text
+                    else:
+                        return left_text + "\n\n" + right_text
     except Exception:
         pass
 
@@ -474,12 +513,24 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     current = "HEADER"
     for line in lines:
         stripped = line.strip().rstrip(":")
-        # Strip continuation markers so "WORK EXPERIENCE (cont.)" → "WORK EXPERIENCE"
+
+        # Skip purely decorative divider lines (═══, ───, ___, ===, etc.)
+        if _DIVIDER_RE.match(stripped):
+            continue
+
+        # Strip leading/trailing decorative symbols (some templates wrap headers
+        # in symbols: "── EXPERIENCE ──" or "● SKILLS ●" or ">>> EDUCATION <<<")
+        normalized = re.sub(
+            r"^[\-─═━_=•·▪▸►●◆◉○→»«<>\s]+|[\-─═━_=•·▪▸►●◆◉○→»«<>\s]+$",
+            "", stripped,
+        ).strip()
+        # Strip continuation markers: "WORK EXPERIENCE (cont.)" → "WORK EXPERIENCE"
         normalized = re.sub(
             r"\s*\(cont(?:inued)?\.?\)\s*$|\s*\(page\s*\d+\)\s*$|\s*-\s*cont(?:inued)?\.?\s*$",
-            "", stripped, flags=re.IGNORECASE,
+            "", normalized, flags=re.IGNORECASE,
         ).strip()
-        if _SECTION_RE.match(normalized + " ") or _SECTION_RE.match(normalized):
+
+        if normalized and (_SECTION_RE.match(normalized + " ") or _SECTION_RE.match(normalized)):
             key = _canonical_section(normalized)
             current = key
             sections.setdefault(current, [])
@@ -679,64 +730,87 @@ def _parse_title_company(header_lines: list[str]) -> tuple[str, str]:
     if not header_lines:
         return title, company
 
+    # Strip noise: dividers, section-header-like lines, and very short fragments
+    # (e.g. "(cont.)" lines that can appear from page-continuation markers)
+    _NOISE_RE = re.compile(
+        r"^\s*(\(cont(?:inued)?\.?\)|cont\.?|page\s*\d+|"
+        r"[\-─═━_=]{2,})\s*$", re.IGNORECASE
+    )
+    clean = [l for l in header_lines if l.strip() and not _NOISE_RE.match(l.strip())]
+    if not clean:
+        return title, company
+
     # Check for combined separators on a single line
-    for line in header_lines:
+    for line in clean:
         # "Title at Company"
-        if re.search(r"\s+at\s+", line, re.IGNORECASE):
+        if re.search(r"\bat\b", line, re.IGNORECASE) and not _DATE_RANGE_RE.search(line):
             parts = re.split(r"\s+at\s+", line, maxsplit=1, flags=re.IGNORECASE)
-            return parts[0].strip(), parts[1].strip()
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                return parts[0].strip(), parts[1].strip()
         # "Title @ Company"
         if " @ " in line:
             parts = line.split(" @ ", 1)
             return parts[0].strip(), parts[1].strip()
-        # "Company | Title" or "Title | Company" — detect by pipe presence
+        # Pipe-separated: "Company | Title" / "Title | Company" / "Title | Company | Location"
         if "|" in line and not _DATE_RANGE_RE.search(line):
-            # Leading pipe means continuation entry (same company, different role)
             if line.lstrip().startswith("|"):
+                # Leading pipe → continuation entry (same company, different role)
                 return line.lstrip().lstrip("|").strip(), ""
-            parts = re.split(r"\s*\|\s*", line, maxsplit=1)
-            left, right = parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
-            if not right:
-                return left, ""
-            # If right side is ALL CAPS → it's the job title; left is the company
-            right_alpha = re.sub(r"[^A-Za-z]", "", right)
-            if right_alpha and right_alpha.isupper():
-                return right, left  # (title, company)
-            # If right has job title keywords and left doesn't → Company | Title format
-            if _JOB_TITLE_RE.search(right) and not _JOB_TITLE_RE.search(left):
-                return right, left  # (title, company)
-            # If left has a corporate suffix → left is the company
-            if _CORP_SUFFIX_RE.search(left):
-                return right, left  # (title, company)
-            return left, right  # default: left=title, right=company
-        # "Title — Company" or "Title – Company"
-        for sep in (" — ", " – ", " - "):
+            segments = [s.strip() for s in re.split(r"\s*\|\s*", line) if s.strip()]
+            if len(segments) >= 2:
+                left, right = segments[0], segments[1]
+                right_alpha = re.sub(r"[^A-Za-z]", "", right)
+                # Right side ALL CAPS → it's the title (resume format: Company | TITLE)
+                if right_alpha and right_alpha.isupper():
+                    return right, left
+                # Right has title keywords, left doesn't → Company | Title
+                if _JOB_TITLE_RE.search(right) and not _JOB_TITLE_RE.search(left):
+                    return right, left
+                # Left has corporate suffix → left is company
+                if _CORP_SUFFIX_RE.search(left):
+                    return right, left
+                return left, right
+        # "Title — Company" or "Title – Company" (em/en dash)
+        for sep in (" — ", " – ", " ─ "):
             if sep in line and not _DATE_RANGE_RE.search(line):
                 parts = line.split(sep, 1)
                 if parts[0].strip() and parts[1].strip():
                     return parts[0].strip(), parts[1].strip()
-        # "Title, Company" (comma separator — require substantial second part to avoid
-        # splitting "Name, Credential" like "Imran Ahmed, CSM®" as title/company)
+        # "Title - Company" (hyphen, only if both sides have 3+ chars)
+        if " - " in line and not _DATE_RANGE_RE.search(line):
+            parts = line.split(" - ", 1)
+            if len(parts[0].strip()) > 2 and len(parts[1].strip()) > 2:
+                return parts[0].strip(), parts[1].strip()
+        # "Title, Company" — require substantial second part to avoid splitting
+        # "Name, Credential" or "City, State"
         if "," in line and not _DATE_RANGE_RE.search(line):
             parts = line.split(",", 1)
             second = parts[1].strip()
-            if second and len(second) > 10 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp)\b", second, re.I):
+            if second and len(second) > 10 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp|[A-Z]{2})\b", second, re.I):
                 return parts[0].strip(), second
 
-    if len(header_lines) >= 2:
-        # ALL-CAPS line is usually the company, mixed-case line is the job title
-        if header_lines[0].isupper() and len(header_lines[0]) > 3:
-            company = header_lines[0].title()
-            title = header_lines[1]
+    # Multi-line header: two separate lines for title and company
+    if len(clean) >= 2:
+        first, second = clean[0], clean[1]
+        first_upper = re.sub(r"[^A-Za-z]", "", first).isupper()
+        second_upper = re.sub(r"[^A-Za-z]", "", second).isupper()
+        # Format: Company (ALL CAPS or has corp suffix) on line 1, Title on line 2
+        if (first_upper and len(first) > 3) or _CORP_SUFFIX_RE.search(first):
+            company = first.title() if first_upper else first
+            title = second
+        # Format: Title on line 1, Company (has corp suffix or is ALL CAPS) on line 2
+        elif (second_upper and len(second) > 3) or _CORP_SUFFIX_RE.search(second):
+            title = first
+            company = second.title() if second_upper else second
         else:
-            title = header_lines[0]
-            # Company is the next line that doesn't look like a location/URL
-            for hl in header_lines[1:]:
+            # Default: first line = title, second non-URL/non-numeric line = company
+            title = first
+            for hl in clean[1:]:
                 if not re.match(r"^\d", hl) and not hl.startswith("http") and len(hl) < 80:
                     company = hl
                     break
-    elif header_lines:
-        title = header_lines[0]
+    elif clean:
+        title = clean[0]
 
     return title.strip(), company.strip()
 
