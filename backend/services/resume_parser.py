@@ -151,26 +151,57 @@ _NUMBERED_BULLET_RE = re.compile(r"^\d+[.)]\s+(.+)")
 
 # ─────────────────────────── PDF EXTRACTION ─────────────────────────────────
 
+def _find_column_split(words: list[dict], page_width: float) -> Optional[float]:
+    """Find the x-coordinate of the gap between a left sidebar and right main column.
+
+    Looks for the largest empty stretch of x-space (no word starts) in the
+    10%-48% region of page width.  Returns the midpoint of that gap, or None
+    if no significant gap is found (single-column page).
+    """
+    lo = page_width * 0.10
+    hi = page_width * 0.48
+
+    # Collect distinct word-start x-positions within the search band
+    xs = sorted({
+        int(float(w.get("x0", 0)))
+        for w in words
+        if lo <= float(w.get("x0", 0)) <= hi
+    })
+    if len(xs) < 2:
+        return None
+
+    max_gap = 0
+    split_x: Optional[float] = None
+    for i in range(1, len(xs)):
+        gap = xs[i] - xs[i - 1]
+        if gap > max_gap:
+            max_gap = gap
+            split_x = (xs[i] + xs[i - 1]) / 2.0
+
+    # Require at least 2.5% of page width as a gap to count as a real column boundary
+    return split_x if (split_x is not None and max_gap > page_width * 0.025) else None
+
+
 def _extract_page_text(page) -> str:
     """Extract text from one PDF page, handling two-column sidebar layouts.
 
-    For resumes with a left sidebar (~30-35% width), pdfplumber's default
-    extraction interleaves sidebar items (interests, skills) with main-column
-    bullets by y-position.  We crop at 35% width: if both columns have
-    substantial content we emit the right (main) column first so section
-    headers are encountered in the correct reading order.
+    Uses word x-coordinates (not page crops) to separate columns, so words
+    that straddle the typical 35% crop boundary are never cut in half.
+    Right column (main content / work experience) is emitted first so that
+    section headers appear before sidebar items in the assembled text.
     """
     try:
         w = float(page.width)
-        h = float(page.height)
-        split_x = w * 0.35
-        left = page.crop((0, 0, split_x, h))
-        right = page.crop((split_x, 0, w, h))
-        left_text = (left.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
-        right_text = (right.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
-        # Only use column split when both columns have real content
-        if len(left_text) > 80 and len(right_text) > 100:
-            return right_text + "\n\n" + left_text
+        words = page.extract_words(x_tolerance=3, y_tolerance=3)
+        if words and len(words) > 15:
+            split_x = _find_column_split(words, w)
+            if split_x is not None:
+                left_words = [wd for wd in words if float(wd.get("x0", 0)) < split_x]
+                right_words = [wd for wd in words if float(wd.get("x0", 0)) >= split_x]
+                left_text = _words_to_lines(left_words).strip()
+                right_text = _words_to_lines(right_words).strip()
+                if len(left_text) > 80 and len(right_text) > 100:
+                    return right_text + "\n\n" + left_text
     except Exception:
         pass
 
@@ -179,7 +210,7 @@ def _extract_page_text(page) -> str:
     if text and len(text.strip()) > 30:
         return text
 
-    # Fallback: word-object reconstruction for complex layouts
+    # Word-object fallback for complex layouts
     words = page.extract_words(
         x_tolerance=5, y_tolerance=5,
         keep_blank_chars=False,
