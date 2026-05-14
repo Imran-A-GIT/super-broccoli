@@ -151,24 +151,51 @@ _NUMBERED_BULLET_RE = re.compile(r"^\d+[.)]\s+(.+)")
 
 # ─────────────────────────── PDF EXTRACTION ─────────────────────────────────
 
+def _extract_page_text(page) -> str:
+    """Extract text from one PDF page, handling two-column sidebar layouts.
+
+    For resumes with a left sidebar (~30-35% width), pdfplumber's default
+    extraction interleaves sidebar items (interests, skills) with main-column
+    bullets by y-position.  We crop at 35% width: if both columns have
+    substantial content we emit the right (main) column first so section
+    headers are encountered in the correct reading order.
+    """
+    try:
+        w = float(page.width)
+        h = float(page.height)
+        split_x = w * 0.35
+        left = page.crop((0, 0, split_x, h))
+        right = page.crop((split_x, 0, w, h))
+        left_text = (left.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
+        right_text = (right.extract_text(x_tolerance=3, y_tolerance=3) or "").strip()
+        # Only use column split when both columns have real content
+        if len(left_text) > 80 and len(right_text) > 100:
+            return right_text + "\n\n" + left_text
+    except Exception:
+        pass
+
+    # Standard single-column extraction
+    text = page.extract_text(x_tolerance=3, y_tolerance=3)
+    if text and len(text.strip()) > 30:
+        return text
+
+    # Fallback: word-object reconstruction for complex layouts
+    words = page.extract_words(
+        x_tolerance=5, y_tolerance=5,
+        keep_blank_chars=False,
+        use_text_flow=True,
+    )
+    return _words_to_lines(words) if words else ""
+
+
 async def parse_pdf(file_bytes: bytes) -> ResumeData:
     """Extract text from PDF and parse into structured resume data."""
     texts: list[str] = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
-            # Primary: standard extraction (handles most PDFs including text boxes)
-            text = page.extract_text(x_tolerance=3, y_tolerance=3)
-            if text and len(text.strip()) > 30:
-                texts.append(text)
-            else:
-                # Fallback: word-object reconstruction (better for complex layouts)
-                words = page.extract_words(
-                    x_tolerance=5, y_tolerance=5,
-                    keep_blank_chars=False,
-                    use_text_flow=True,
-                )
-                if words:
-                    texts.append(_words_to_lines(words))
+            page_text = _extract_page_text(page)
+            if page_text:
+                texts.append(page_text)
 
     full_text = "\n\n".join(texts)
     if not full_text.strip():
@@ -284,8 +311,17 @@ async def parse_text(raw_text: str) -> ResumeData:
 # ─────────────────────────── MAIN PARSER ────────────────────────────────────
 
 def _parse_text(text: str) -> ResumeData:
-    # Normalize: CRLF → LF, strip trailing whitespace per line
+    # Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Normalize Unicode punctuation: smart quotes/apostrophes → straight ASCII.
+    # PDFs often embed curly apostrophes (U+2018/2019) which break date regex like "Aug '21".
+    text = (
+        text
+        .replace("‘", "'").replace("’", "'")  # left/right single quotes
+        .replace("“", '"').replace("”", '"')  # left/right double quotes
+        .replace("ʼ", "'").replace("′", "'")  # modifier apostrophe, prime
+        .replace("–", "–").replace("—", "—")  # en-dash, em-dash (keep as-is but ensure)
+    )
     lines = [ln.rstrip() for ln in text.splitlines()]
 
     contact = _extract_contact(lines, text)
@@ -314,7 +350,7 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
     phone = (m.group() if (m := _PHONE_RE.search(full_text)) else None)
     linkedin = (m.group() if (m := _LINKEDIN_RE.search(full_text)) else None)
 
-    # Name detection — two passes:
+    # Name detection — three passes:
     # Pass 1: "Name | email | phone" combined header — name is ALWAYS the first token
     name: Optional[str] = None
     for line in lines[:3]:
@@ -333,7 +369,7 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
                 name = first_token
                 break
 
-    # Pass 2 (fallback): first short standalone non-contact, non-header line
+    # Pass 2 (fallback): first short standalone non-contact, non-header line in first 12 lines
     if not name:
         for line in lines[:12]:
             stripped = line.strip()
@@ -345,11 +381,43 @@ def _extract_contact(lines: list[str], full_text: str) -> ContactInfo:
                 and not _SECTION_RE.match(stripped)
                 and not stripped.startswith("+")
                 and not re.match(r"^\d", stripped)
-                and 2 < len(stripped) < 60
+                and "|" not in stripped
+                and not _DATE_RANGE_RE.search(stripped)
+                and 2 < len(stripped) < 50
                 and not (stripped.isupper() and (len(stripped.split()) > 2 or _CORP_SUFFIX_RE.search(stripped)))
             ):
                 name = stripped
                 break
+
+    # Pass 3 (extended fallback): scan all lines for a name-like pattern.
+    # Handles two-column PDFs where the name appears far into the extracted text
+    # (e.g. left-column name gets read after right-column work experience).
+    if not name:
+        _PREPOSITIONS = frozenset({"of", "and", "or", "at", "in", "the", "for", "by", "to", "a", "an"})
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if (_EMAIL_RE.search(stripped) or _PHONE_RE.search(stripped)
+                    or _URL_RE.search(stripped) or stripped.startswith("+")
+                    or re.match(r"^\d", stripped) or "|" in stripped
+                    or _BULLET_RE.match(stripped) or _DATE_RANGE_RE.search(stripped)
+                    or _SECTION_RE.match(stripped.rstrip(":"))
+                    or _CORP_SUFFIX_RE.search(stripped)
+                    or len(stripped) > 45):
+                continue
+            # Split and strip trailing credentials (short all-caps like CSM, PMP, MBA)
+            raw_tokens = re.split(r"[\s,]+", stripped)
+            name_tokens = [
+                t for t in raw_tokens
+                if t and not (len(re.sub(r"[®©™]", "", t)) <= 4 and re.sub(r"[®©™]", "", t).isupper())
+            ]
+            if 1 < len(name_tokens) <= 4:
+                lower_toks = [t.lower().strip(".,®©™") for t in name_tokens]
+                if not any(t in _PREPOSITIONS for t in lower_toks):
+                    if all(re.match(r"^[A-Za-z\'\-]+$", t) for t in name_tokens):
+                        name = " ".join(t.title() if t.isupper() else t for t in name_tokens)
+                        break
 
     # Location: City, ST or City, Country
     location: Optional[str] = None
@@ -375,8 +443,13 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     current = "HEADER"
     for line in lines:
         stripped = line.strip().rstrip(":")
-        if _SECTION_RE.match(stripped + " ") or _SECTION_RE.match(stripped):
-            key = _canonical_section(stripped)
+        # Strip continuation markers so "WORK EXPERIENCE (cont.)" → "WORK EXPERIENCE"
+        normalized = re.sub(
+            r"\s*\(cont(?:inued)?\.?\)\s*$|\s*\(page\s*\d+\)\s*$|\s*-\s*cont(?:inued)?\.?\s*$",
+            "", stripped, flags=re.IGNORECASE,
+        ).strip()
+        if _SECTION_RE.match(normalized + " ") or _SECTION_RE.match(normalized):
+            key = _canonical_section(normalized)
             current = key
             sections.setdefault(current, [])
         else:
@@ -402,9 +475,36 @@ def _extract_jobs(sections: dict[str, list[str]], section_type: str) -> list[Wor
     for key in sections:
         if key == section_type:
             lines.extend(sections[key])
+
+    if section_type == "EXPERIENCE":
+        # Two-column PDF fix: job entries that appear before the first section
+        # header land in HEADER.  Include them if they contain date ranges.
+        header_lines = sections.get("HEADER", [])
+        if any(_DATE_RANGE_RE.search(l) for l in header_lines):
+            lines = header_lines + lines
+
+        # Safety net: if co-op / older roles landed in INTERESTS or PROJECTS
+        # (due to page-boundary section attribution), absorb them too.
+        for extra_key in ("INTERESTS", "PROJECTS", "AWARDS"):
+            extra = sections.get(extra_key, [])
+            if any(_DATE_RANGE_RE.search(l) for l in extra):
+                lines = lines + extra
+
     if not lines:
         return []
-    return _parse_job_blocks(lines)
+
+    jobs = _parse_job_blocks(lines)
+
+    # Deduplicate by (title[:30], company[:20], start_date) — guards against
+    # the same entry being picked up from both HEADER and EXPERIENCE.
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[WorkExperience] = []
+    for j in jobs:
+        key = (j.title.lower()[:30], j.company.lower()[:20], (j.start_date or "").lower())
+        if key not in seen:
+            seen.add(key)
+            unique.append(j)
+    return unique
 
 
 def _parse_job_blocks(lines: list[str]) -> list[WorkExperience]:
@@ -584,11 +684,12 @@ def _parse_title_company(header_lines: list[str]) -> tuple[str, str]:
                 parts = line.split(sep, 1)
                 if parts[0].strip() and parts[1].strip():
                     return parts[0].strip(), parts[1].strip()
-        # "Title, Company" (comma separator — only if company-like 2nd part)
+        # "Title, Company" (comma separator — require substantial second part to avoid
+        # splitting "Name, Credential" like "Imran Ahmed, CSM®" as title/company)
         if "," in line and not _DATE_RANGE_RE.search(line):
             parts = line.split(",", 1)
             second = parts[1].strip()
-            if second and len(second) > 3 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp)\b", second, re.I):
+            if second and len(second) > 10 and not re.match(r"^\s*(Inc|LLC|Ltd|Corp)\b", second, re.I):
                 return parts[0].strip(), second
 
     if len(header_lines) >= 2:
